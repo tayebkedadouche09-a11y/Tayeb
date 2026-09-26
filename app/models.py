@@ -40,3 +40,19 @@ class BudgetIn(BaseModel):
 
 class FiscalPeriodIn(BaseModel):
  code:str; start_date:str; end_date:str
+
+
+class SupplierInvoiceIn(BaseModel):
+ project_id:Optional[int]=None; supplier:str; invoice_no:str; invoice_date:str; due_date:Optional[str]=None; amount:float=Field(gt=0); tax_amount:float=Field(0,ge=0); purchase_id:Optional[int]=None
+
+class SupplierPaymentIn(BaseModel):
+ supplier_invoice_id:int; payment_date:str; amount:float=Field(gt=0); reference:str=""
+
+class PayrollAllocationIn(BaseModel):
+ payroll_item_id:int; project_id:int; hours:float=Field(gt=0); amount:float=Field(gt=0)
+
+class BudgetVersionIn(BaseModel):
+ project_id:int; notes:str=""
+
+class JournalReversalIn(BaseModel):
+ reason:str=Field(min_length=3,max_length=500)
