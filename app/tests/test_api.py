@@ -95,3 +95,16 @@ def test_supplier_payroll_budget_and_reversal():
     c.post(f"/api/accounting/journals/{j['id']}/post")
     rj=c.post(f"/api/accounting/journals/{j['id']}/reverse",json={"reason":"Correction"}).json()
     assert rj["status"]=="Posted" and rj["total_debit"]==100 and rj["total_credit"]==100
+
+
+def test_project_membership_model():
+    p=c.post("/api/projects",json={"code":"PM-"+uuid.uuid4().hex[:8],"name":"Membership Project"}).json()
+    w=c.post("/api/auth/users",json={"username":"member-"+uuid.uuid4().hex[:6],"password":"StrongPass123!","role":"engineer"})
+    assert w.status_code==200
+    uid=w.json()["id"]
+    assigned=c.post(f"/api/auth/users/{uid}/projects/{p['id']}")
+    assert assigned.status_code==200
+    assert c.get(f"/api/projects/{p['id']}/members").status_code==200
+    assert c.get(f"/api/auth/users/{uid}/projects").json()[0]["id"]==p["id"]
+    assert c.post(f"/api/auth/users/{uid}/projects/{p['id']}").status_code==409
+    assert c.delete(f"/api/auth/users/{uid}/projects/{p['id']}").status_code==200
