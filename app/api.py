@@ -177,6 +177,73 @@ def cost_breakdown(pid:int):
  if not one("SELECT id FROM projects WHERE id=?",(pid,)): raise HTTPException(404,"Project not found")
  s=financial_summary(pid)
  return {"project_id":pid,"breakdown":{"direct":s["direct_costs"],"purchases":s["purchases"],"equipment":s["equipment_cost"],"labour":s["labour_cost"],"materials":s["material_consumption_cost"],"subcontractors":s["subcontract_value"]},"total_estimated_cost":s["estimated_cost"]}
+@router.post("/payroll/periods")
+def payroll_period(x:PayrollPeriodIn): return insert("payroll_periods",["period_start","period_end"],[x.period_start,x.period_end])
+@router.post("/payroll/periods/{period_id}/items")
+def payroll_item(period_id:int,x:PayrollItemIn):
+ if not one("SELECT id FROM payroll_periods WHERE id=?",(period_id,)): raise HTTPException(404,"Payroll period not found")
+ w=one("SELECT daily_rate FROM workers WHERE id=?",(x.worker_id,))
+ if not w: raise HTTPException(404,"Worker not found")
+ rate=x.rate_per_hour or (w["daily_rate"]/8)
+ gross=x.regular_hours*rate+x.overtime_hours*rate*1.5
+ return insert("payroll_items",["period_id","worker_id","regular_hours","overtime_hours","rate_per_hour","gross_amount"],[period_id,x.worker_id,x.regular_hours,x.overtime_hours,rate,gross])
+@router.get("/payroll/periods/{period_id}")
+def payroll_detail(period_id:int):
+ p=one("SELECT * FROM payroll_periods WHERE id=?",(period_id,))
+ if not p: raise HTTPException(404,"Payroll period not found")
+ p["items"]=rows("SELECT pi.*,w.name worker_name,w.role FROM payroll_items pi JOIN workers w ON w.id=pi.worker_id WHERE pi.period_id=?",(period_id,))
+ p["total"]=sum(x["gross_amount"] for x in p["items"])
+ return p
+@router.post("/payroll/periods/{period_id}/approve")
+def payroll_approve(period_id:int):
+ if not one("SELECT id FROM payroll_periods WHERE id=?",(period_id,)): raise HTTPException(404,"Payroll period not found")
+ with connect() as c:c.execute("UPDATE payroll_periods SET status='Approved' WHERE id=?",(period_id,))
+ audit("approve","payroll_period",period_id); return one("SELECT * FROM payroll_periods WHERE id=?",(period_id,))
+@router.post("/change-orders")
+def change_order(x:ChangeOrderIn): return insert("change_orders",list(x.model_dump().keys()),list(x.model_dump().values()))
+@router.get("/change-orders")
+def change_orders(project_id:int|None=None): return rows("SELECT * FROM change_orders WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
+@router.post("/change-orders/{order_id}/approve")
+def approve_change_order(order_id:int):
+ if not one("SELECT id FROM change_orders WHERE id=?",(order_id,)): raise HTTPException(404,"Change order not found")
+ with connect() as c:c.execute("UPDATE change_orders SET status='Approved',approved_at=CURRENT_TIMESTAMP WHERE id=?",(order_id,))
+ audit("approve","change_order",order_id); return one("SELECT * FROM change_orders WHERE id=?",(order_id,))
+@router.post("/progress")
+def progress(x:ProgressIn):
+ if not one("SELECT id FROM projects WHERE id=?",(x.project_id,)): raise HTTPException(404,"Project not found")
+ b=one("SELECT project_id,unit_rate FROM boq WHERE id=?",(x.boq_id,))
+ if not b or b["project_id"]!=x.project_id: raise HTTPException(404,"BOQ item not found")
+ rate=x.unit_rate or b["unit_rate"]
+ return insert("progress_entries",["project_id","boq_id","report_date","quantity","unit_rate","amount","status"],[x.project_id,x.boq_id,x.report_date,x.quantity,rate,x.quantity*rate,x.status])
+@router.get("/progress")
+def progress_list(project_id:int|None=None): return rows("SELECT pe.*,b.code boq_code,b.description FROM progress_entries pe JOIN boq b ON b.id=pe.boq_id WHERE pe.project_id=COALESCE(?,pe.project_id) ORDER BY report_date DESC",(project_id,))
+@router.get("/projects/{pid}/progress-summary")
+def progress_summary(pid:int):
+ if not one("SELECT id FROM projects WHERE id=?",(pid,)): raise HTTPException(404,"Project not found")
+ return rows("SELECT b.code,b.description,b.quantity planned_quantity,COALESCE(SUM(pe.quantity),0) executed_quantity,b.unit, b.quantity-COALESCE(SUM(pe.quantity),0) remaining_quantity FROM boq b LEFT JOIN progress_entries pe ON pe.boq_id=b.id AND pe.status!='Rejected' WHERE b.project_id=? GROUP BY b.id ORDER BY b.code",(pid,))
+@router.post("/billing-payments")
+def billing_payment(x:BillingPaymentIn):
+ if not one("SELECT id FROM billings WHERE id=?",(x.billing_id,)): raise HTTPException(404,"Billing not found")
+ return insert("billing_payments",["billing_id","payment_date","amount","reference"],list(x.model_dump().values()))
+@router.get("/billings/{billing_id}/payments")
+def billing_payments(billing_id:int):
+ b=one("SELECT * FROM billings WHERE id=?",(billing_id,))
+ if not b: raise HTTPException(404,"Billing not found")
+ ps=rows("SELECT * FROM billing_payments WHERE billing_id=? ORDER BY payment_date",(billing_id,))
+ return {"billing":b,"payments":ps,"paid":sum(x["amount"] for x in ps),"balance":b["gross_amount"]-sum(x["amount"] for x in ps)}
+@router.post("/documents")
+def document(x:DocumentIn): return insert("documents",list(x.model_dump().keys()),list(x.model_dump().values()))
+@router.get("/documents")
+def documents(project_id:int|None=None): return rows("SELECT * FROM documents WHERE project_id=COALESCE(?,project_id) ORDER BY created_at DESC",(project_id,))
+@router.post("/issues")
+def issue(x:IssueIn): return insert("issues",list(x.model_dump().keys()),list(x.model_dump().values()))
+@router.get("/issues")
+def issues(project_id:int|None=None): return rows("SELECT * FROM issues WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
+@router.post("/issues/{issue_id}/close")
+def close_issue(issue_id:int):
+ if not one("SELECT id FROM issues WHERE id=?",(issue_id,)): raise HTTPException(404,"Issue not found")
+ with connect() as c:c.execute("UPDATE issues SET status='Closed' WHERE id=?",(issue_id,))
+ audit("close","issue",issue_id); return one("SELECT * FROM issues WHERE id=?",(issue_id,))
 @router.get("/audit")
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
