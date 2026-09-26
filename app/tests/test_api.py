@@ -19,3 +19,18 @@ def test_commercial_flow():
  inv=c.post("/api/billings",json={"project_id":pid,"invoice_no":"I-"+uuid.uuid4().hex[:6],"gross_amount":1000}).json()
  assert inv["retention_amount"]==50 and inv["net_amount"]==950
  assert c.get(f"/api/projects/{pid}").json()["boq"][0]["amount"]==500
+def test_new_workflows():
+ p=c.post("/api/projects",json={"code":"N-"+uuid.uuid4().hex[:8],"name":"New Workflows","contract_value":50000}).json(); pid=p["id"]
+ b=c.post("/api/boq",json={"project_id":pid,"code":"01","description":"Wall","quantity":100,"unit_rate":20}).json()
+ w=c.post("/api/workers",json={"code":"PW-"+uuid.uuid4().hex[:6],"name":"Payroll Worker","daily_rate":160}).json()
+ period=c.post("/api/payroll/periods",json={"period_start":"2026-09-01","period_end":"2026-09-30"}).json()
+ item=c.post(f"/api/payroll/periods/{period['id']}/items",json={"worker_id":w["id"],"regular_hours":8}).json()
+ assert item["gross_amount"]==160
+ assert c.post("/api/progress",json={"project_id":pid,"boq_id":b["id"],"report_date":"2026-09-26","quantity":10}).status_code==200
+ co=c.post("/api/change-orders",json={"project_id":pid,"code":"CO-01","description":"Extra work","amount":1000}).json()
+ assert c.post(f"/api/change-orders/{co['id']}/approve").status_code==200
+ inv=c.post("/api/billings",json={"project_id":pid,"invoice_no":"NP-"+uuid.uuid4().hex[:6],"gross_amount":2000}).json()
+ pay=c.post("/api/billing-payments",json={"billing_id":inv["id"],"payment_date":"2026-09-26","amount":500}).status_code
+ assert pay==200
+ assert c.post("/api/documents",json={"project_id":pid,"document_type":"plan","name":"plan.pdf","storage_uri":"s3://docs/plan.pdf"}).status_code==200
+ assert c.post("/api/issues",json={"project_id":pid,"title":"Delay"}).status_code==200
