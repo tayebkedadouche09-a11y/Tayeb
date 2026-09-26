@@ -57,7 +57,22 @@ def create_user(x:UserIn,request:Request):
  user=require_permission(request,"*")
  if user["role"] not in {"owner","admin"}: raise HTTPException(403,"Admin access required")
  if x.role not in {"owner","admin","project_manager","engineer","accountant","site_manager","viewer"}: raise HTTPException(422,"Invalid role")
+ if one("SELECT id FROM users WHERE username=?",(x.username,)): raise HTTPException(409,"Username already exists")
  return insert("users",["username","password_hash","role"],[x.username,create_password(x.password),x.role])
+
+@router.patch("/auth/users/{user_id}/active")
+def set_user_active(user_id:int,x:UserStatusIn,request:Request):
+ user=require_permission(request,"*")
+ if user["role"] not in {"owner","admin"}: raise HTTPException(403,"Admin access required")
+ target=one("SELECT id,username,role,active FROM users WHERE id=?",(user_id,))
+ if not target: raise HTTPException(404,"User not found")
+ if target["id"]==int(user["sub"]) and not x.active: raise HTTPException(409,"You cannot deactivate your own account")
+ if target["role"]=="owner" and not x.active:
+  owners=one("SELECT COUNT(*) v FROM users WHERE role='owner' AND active=1")["v"]
+  if owners<=1: raise HTTPException(409,"At least one active owner is required")
+ with connect() as c:c.execute("UPDATE users SET active=? WHERE id=?",(1 if x.active else 0,user_id))
+ audit("activate" if x.active else "deactivate","user",user_id)
+ return one("SELECT id,username,role,active,created_at FROM users WHERE id=?",(user_id,))
 @router.get("/dashboard")
 def dashboard():
  p=rows("SELECT * FROM projects")
