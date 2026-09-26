@@ -106,6 +106,6 @@ def bim(x:BIMJobIn):
    with connect() as c:c.execute("UPDATE bim_jobs SET status='GatewayError',result_json=? WHERE id=?",(json.dumps({"error":str(e)}),i["id"]))
  return one("SELECT * FROM bim_jobs WHERE id=?",(i["id"],))
 @router.get("/audit")
-def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500)
+def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
 def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"bim_boundary":True}
