@@ -171,6 +171,9 @@ def billings(project_id:int|None=None):return rows("SELECT *,gross_amount*retent
 def cashflow(x:CashflowIn):return insert("cashflow",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/cashflow")
 def cashflow_list(project_id:int|None=None):return rows("SELECT * FROM cashflow WHERE project_id=COALESCE(?,project_id) ORDER BY entry_date DESC",(project_id,))
+@router.get("/bim/jobs")
+def bim_jobs(project_id:int|None=None):
+ return rows("SELECT * FROM bim_jobs WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
 @router.post("/bim/jobs")
 def bim(x:BIMJobIn):
  i=insert("bim_jobs",["project_id","source_type","source_uri","job_type"],list(x.model_dump().values()))
