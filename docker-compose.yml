@@ -1,0 +1,14 @@
+services:
+  tayeb:
+    build: ./app
+    ports: ["8000:8000"]
+    environment:
+      TAYEB_BIM_URL: http://bim-engine:8001
+    volumes: ["tayeb_data:/app/data"]
+  bim-engine:
+    image: python:3.12-slim
+    working_dir: /srv
+    command: sh -c "pip install fastapi uvicorn pydantic && uvicorn main:app --host 0.0.0.0 --port 8001"
+    volumes: ["./services/bim-engine:/srv"]
+volumes:
+  tayeb_data:
