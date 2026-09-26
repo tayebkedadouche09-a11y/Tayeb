@@ -56,3 +56,11 @@ def test_finance_integrations():
     co=c.post("/api/change-orders",json={"project_id":p["id"],"code":"CO-FI","description":"Extra","amount":250}).json()
     assert c.post(f"/api/change-orders/{co['id']}/approve").json()["status"]=="Approved"
     assert c.get(f"/api/projects/{p['id']}").json()["contract_value"]==10250
+
+def test_fiscal_period_and_invoice_accounting():
+ p=c.post("/api/projects",json={"code":"FP-"+uuid.uuid4().hex[:8],"name":"Fiscal Project","contract_value":10000}).json()
+ fp=c.post("/api/accounting/fiscal-periods",json={"code":"FP-"+uuid.uuid4().hex[:6],"start_date":"2026-09-01","end_date":"2026-09-30"}).json()
+ inv=c.post("/api/billings",json={"project_id":p["id"],"invoice_no":"VAT-"+uuid.uuid4().hex[:6],"gross_amount":1000,"retention_percent":5,"tax_amount":190}).json()
+ assert inv["net_amount"]==1140
+ assert c.post("/api/billing-payments",json={"billing_id":inv["id"],"payment_date":"2026-09-26","amount":1140}).status_code==200
+ assert c.post(f"/api/accounting/fiscal-periods/{fp['id']}/close").status_code==200
