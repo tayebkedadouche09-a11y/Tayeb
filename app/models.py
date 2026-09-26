@@ -23,7 +23,7 @@ class PurchaseItemIn(BaseModel): material_id:Optional[int]=None; description:str
 class PayrollPeriodIn(BaseModel): period_start:str; period_end:str
 class PayrollItemIn(BaseModel): worker_id:int; regular_hours:float=Field(0,ge=0); overtime_hours:float=Field(0,ge=0); rate_per_hour:float=Field(0,ge=0)
 class ChangeOrderIn(BaseModel): project_id:int; code:str; description:str; amount:float=0; status:str="Draft"
-class ProgressIn(BaseModel): project_id:int; boq_id:int; report_date:str; quantity:float=Field(gt=0); unit_rate:float=Field(ge=0); status:str="Draft"
+class ProgressIn(BaseModel): project_id:int; boq_id:int; report_date:str; quantity:float=Field(gt=0); unit_rate:float=Field(0,ge=0); status:str="Draft"
 class BillingPaymentIn(BaseModel): billing_id:int; payment_date:str; amount:float=Field(gt=0); reference:str=""
 class DocumentIn(BaseModel): project_id:Optional[int]=None; document_type:str; name:str; storage_uri:str; version:int=Field(1,ge=1)
 class IssueIn(BaseModel): project_id:int; title:str; description:str=""; severity:str="Medium"; status:str="Open"; due_date:Optional[str]=None
