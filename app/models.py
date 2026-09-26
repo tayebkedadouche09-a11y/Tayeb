@@ -18,6 +18,7 @@ class BIMJobIn(BaseModel): project_id:int; source_type:str; source_uri:str; job_
 class CostIn(BaseModel): project_id:int; entry_date:str; cost_type:str; description:str=""; amount:float=Field(gt=0); reference:str=""
 class LoginIn(BaseModel): username:str=Field(min_length=1,max_length=80); password:str=Field(min_length=8,max_length=256)
 class UserIn(BaseModel): username:str=Field(min_length=1,max_length=80); password:str=Field(min_length=8,max_length=256); role:str="viewer"
+class UserStatusIn(BaseModel): active:bool
 class PurchaseItemIn(BaseModel): material_id:Optional[int]=None; description:str=""; quantity:float=Field(gt=0); unit_rate:float=Field(ge=0)
 
 class PayrollPeriodIn(BaseModel): period_start:str; period_end:str
