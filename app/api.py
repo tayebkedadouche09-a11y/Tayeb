@@ -19,6 +19,8 @@ def account_id(code):
     if not a: raise HTTPException(500,f"Required account {code} is not configured")
     return a["id"]
 def post_system_journal(entry_no,entry_date,description,project_id,lines):
+    fp=one("SELECT status FROM fiscal_periods WHERE start_date<=? AND end_date>=? ORDER BY id DESC LIMIT 1",(entry_date,entry_date))
+    if fp and fp["status"]=="Closed": raise HTTPException(409,"Fiscal period is closed")
     if any(l[1] < 0 or l[2] < 0 or (l[1] and l[2]) for l in lines): raise HTTPException(500,"Invalid system journal line")
     debit=sum(l[1] for l in lines); credit=sum(l[2] for l in lines)
     if abs(debit-credit)>0.000001: raise HTTPException(500,"System journal is not balanced")
@@ -157,7 +159,12 @@ def subcontractor(x:SubcontractIn):return insert("subcontractors",list(x.model_d
 def daily(x:DailyReportIn):return insert("daily_reports",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.post("/billings")
 def billing(x:BillingIn):
- d=x.model_dump();i=insert("billings",list(d.keys()),list(d.values()));i["retention_amount"]=x.gross_amount*x.retention_percent/100;i["net_amount"]=x.gross_amount-i["retention_amount"]+x.tax_amount;return i
+ d=x.model_dump(); i=insert("billings",list(d.keys()),list(d.values()))
+ retention=x.gross_amount*x.retention_percent/100; net=x.gross_amount-retention+x.tax_amount
+ lines=[(account_id("1100"),net,0,"Accounts receivable",x.project_id),(account_id("1300"),retention,0,"Retention receivable",x.project_id),(account_id("4000"),0,x.gross_amount,"Construction revenue",x.project_id)]
+ if x.tax_amount: lines.append((account_id("2200"),0,x.tax_amount,"Tax payable",x.project_id))
+ post_system_journal("INV-"+str(i["id"]),i["created_at"][:10] if i["created_at"] else "2099-01-01","Invoice "+x.invoice_no,x.project_id,lines)
+ i["retention_amount"]=retention; i["net_amount"]=net; return i
 @router.get("/billings")
 def billings(project_id:int|None=None):return rows("SELECT *,gross_amount*retention_percent/100 retention_amount,gross_amount-gross_amount*retention_percent/100+tax_amount net_amount FROM billings WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
 @router.post("/cashflow")
@@ -261,8 +268,9 @@ def billing_payment(x:BillingPaymentIn):
     b=one("SELECT * FROM billings WHERE id=?",(x.billing_id,))
     if not b: raise HTTPException(404,"Billing not found")
     paid=one("SELECT COALESCE(SUM(amount),0)v FROM billing_payments WHERE billing_id=?",(x.billing_id,))["v"]
-    if paid+x.amount>b["gross_amount"]+0.000001: raise HTTPException(409,"Payment exceeds billing balance")
+    if paid+x.amount>(b["gross_amount"]-b["gross_amount"]*b["retention_percent"]/100+b["tax_amount"])+0.000001: raise HTTPException(409,"Payment exceeds billing balance")
     p=insert("billing_payments",["billing_id","payment_date","amount","reference"],list(x.model_dump().values()))
+    insert("cashflow",["project_id","entry_date","direction","category","amount","reference"],[b["project_id"],x.payment_date,"IN","Billing",x.amount,x.reference or ("PAY-"+str(p["id"]))])
     post_system_journal("PAY-"+str(p["id"]),x.payment_date,"Billing payment "+(x.reference or str(x.billing_id)),b["project_id"],[(account_id("1000"),x.amount,0,"Customer receipt",b["project_id"]),(account_id("1100"),0,x.amount,"Accounts receivable",b["project_id"])])
     return p
 
@@ -325,6 +333,22 @@ def close_issue(issue_id:int):
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
 def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"payroll":True,"change_orders":True,"progress":True,"billing_payments":True,"documents":True,"issues":True,"bim_boundary":True}
+@router.post("/accounting/fiscal-periods")
+def create_fiscal_period(x:FiscalPeriodIn):
+ if x.start_date>x.end_date: raise HTTPException(422,"Start date must not be after end date")
+ if one("SELECT id FROM fiscal_periods WHERE start_date<=? AND end_date>=?",(x.end_date,x.start_date)): raise HTTPException(409,"Fiscal period overlaps an existing period")
+ return insert("fiscal_periods",["code","start_date","end_date"],[x.code,x.start_date,x.end_date])
+@router.get("/accounting/fiscal-periods")
+def list_fiscal_periods(): return rows("SELECT * FROM fiscal_periods ORDER BY start_date DESC")
+@router.post("/accounting/fiscal-periods/{period_id}/close")
+def close_fiscal_period(period_id:int):
+ p=one("SELECT * FROM fiscal_periods WHERE id=?",(period_id,))
+ if not p: raise HTTPException(404,"Fiscal period not found")
+ if p["status"]=="Closed": return p
+ if one("SELECT id FROM journal_entries WHERE entry_date BETWEEN ? AND ? AND status!='Posted'",(p["start_date"],p["end_date"])): raise HTTPException(409,"Cannot close period with draft journal entries")
+ with connect() as c:c.execute("UPDATE fiscal_periods SET status='Closed',closed_at=CURRENT_TIMESTAMP WHERE id=?",(period_id,))
+ audit("close","fiscal_period",period_id); return one("SELECT * FROM fiscal_periods WHERE id=?",(period_id,))
+
 @router.post("/budgets")
 def create_budget(x:BudgetIn):
     if not one("SELECT id FROM projects WHERE id=?",(x.project_id,)): raise HTTPException(404,"Project not found")
@@ -387,6 +411,8 @@ def journal_detail(journal_id:int):
 def post_journal(journal_id:int):
  j=journal_detail(journal_id)
  if abs(j["total_debit"]-j["total_credit"])>0.000001: raise HTTPException(409,"Journal is not balanced")
+ fp=one("SELECT status FROM fiscal_periods WHERE start_date<=? AND end_date>=? ORDER BY id DESC LIMIT 1",(j["entry_date"],j["entry_date"]))
+ if fp and fp["status"]=="Closed": raise HTTPException(409,"Fiscal period is closed")
  with connect() as c: c.execute("UPDATE journal_entries SET status='Posted',posted_at=CURRENT_TIMESTAMP WHERE id=? AND status='Draft'",(journal_id,))
  audit("post","journal_entry",journal_id)
  return journal_detail(journal_id)
