@@ -5,6 +5,18 @@ db.init_db()
 from fastapi.testclient import TestClient
 from app.main import app
 c=TestClient(app)
+
+import pytest
+@pytest.fixture(autouse=True)
+def reset_test_database():
+    c.close()
+    try:
+        db.DB.unlink()
+    except FileNotFoundError:
+        pass
+    db.init_db()
+    yield
+    c.close()
 def test_health(): assert c.get("/health").json()["status"]=="ok"
 def test_commercial_flow():
  p=c.post("/api/projects",json={"code":"T-"+uuid.uuid4().hex[:8],"name":"Commercial Build","contract_value":100000}).json();pid=p["id"]
