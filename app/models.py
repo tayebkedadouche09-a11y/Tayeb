@@ -16,3 +16,5 @@ class BillingIn(BaseModel): project_id:int; invoice_no:str; gross_amount:float=F
 class CashflowIn(BaseModel): project_id:int; entry_date:str; direction:str; category:str; amount:float=Field(gt=0); reference:str=""
 class BIMJobIn(BaseModel): project_id:int; source_type:str; source_uri:str; job_type:str="takeoff"
 class CostIn(BaseModel): project_id:int; entry_date:str; cost_type:str; description:str=""; amount:float=Field(gt=0); reference:str=""
+class LoginIn(BaseModel): username:str=Field(min_length=1,max_length=80); password:str=Field(min_length=8,max_length=256)
+class UserIn(BaseModel): username:str=Field(min_length=1,max_length=80); password:str=Field(min_length=8,max_length=256); role:str="viewer"
