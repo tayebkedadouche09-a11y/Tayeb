@@ -34,3 +34,13 @@ def test_new_workflows():
  assert pay==200
  assert c.post("/api/documents",json={"project_id":pid,"document_type":"plan","name":"plan.pdf","storage_uri":"s3://docs/plan.pdf"}).status_code==200
  assert c.post("/api/issues",json={"project_id":pid,"title":"Delay"}).status_code==200
+
+def test_accounting_flow():
+ p=c.post("/api/projects",json={"code":"AC-"+uuid.uuid4().hex[:8],"name":"Accounting Project","contract_value":10000}).json()
+ cash=c.post("/api/accounting/accounts",json={"code":"1"+uuid.uuid4().hex[:5],"name":"Cash","account_type":"Asset"}).json()
+ rev=c.post("/api/accounting/accounts",json={"code":"4"+uuid.uuid4().hex[:5],"name":"Revenue","account_type":"Revenue"}).json()
+ j=c.post("/api/accounting/journals",json={"entry_no":"JE-"+uuid.uuid4().hex[:8],"entry_date":"2026-09-26","project_id":p["id"],"lines":[{"account_id":cash["id"],"debit":1000},{"account_id":rev["id"],"credit":1000}]}).json()
+ assert j["total_debit"]==1000 and j["total_credit"]==1000
+ assert c.post(f"/api/accounting/journals/{j['id']}/post").json()["status"]=="Posted"
+ tb=c.get("/api/accounting/trial-balance").json()
+ assert any(x["code"]==cash["code"] and x["balance"]==1000 for x in tb)
