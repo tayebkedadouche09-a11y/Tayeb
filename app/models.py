@@ -34,3 +34,6 @@ class JournalLineIn(BaseModel):
  account_id:int; debit:float=Field(0,ge=0); credit:float=Field(0,ge=0); description:str=""; project_id:Optional[int]=None
 class JournalEntryIn(BaseModel):
  entry_no:str; entry_date:str; description:str=""; project_id:Optional[int]=None; lines:list[JournalLineIn]=Field(min_length=2)
+
+class BudgetIn(BaseModel):
+ project_id:int; code:str; description:str=""; amount:float=Field(0,ge=0); category:str="General"
