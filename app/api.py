@@ -247,4 +247,4 @@ def close_issue(issue_id:int):
 @router.get("/audit")
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
-def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"bim_boundary":True}
+def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"payroll":True,"change_orders":True,"progress":True,"billing_payments":True,"documents":True,"issues":True,"bim_boundary":True}
