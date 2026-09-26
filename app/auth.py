@@ -6,11 +6,11 @@ ROLES={"owner","admin","project_manager","engineer","accountant","site_manager",
 PERMISSIONS={
  "owner":{"*"},
  "admin":{"*"},
- "project_manager":{"projects","boq","tasks","reports","workers","attendance","equipment","materials","purchases","subcontractors","billings","cashflow","costs","bim"},
- "engineer":{"projects","boq","tasks","reports","bim"},
- "accountant":{"projects","billings","cashflow","costs","purchases"},
- "site_manager":{"projects","tasks","reports","workers","attendance","equipment","materials"},
- "viewer":{"projects","boq","tasks","reports","workers","equipment","materials","purchases","subcontractors","billings","cashflow","costs","bim"},
+ "project_manager":{"projects","boq","tasks","reports","workers","attendance","equipment","materials","purchases","subcontractors","billings","cashflow","costs","bim","payroll","documents","issues"},
+ "engineer":{"projects","boq","tasks","reports","bim","documents","issues"},
+ "accountant":{"projects","billings","cashflow","costs","purchases","payroll"},
+ "site_manager":{"projects","tasks","reports","workers","attendance","equipment","materials","issues"},
+ "viewer":{"projects","boq","tasks","reports","workers","equipment","materials","purchases","subcontractors","billings","cashflow","costs","bim","payroll","documents","issues"},
 }
 def _hash(password,salt):
  return hashlib.pbkdf2_hmac("sha256",password.encode(),salt,210000).hex()
