@@ -4,6 +4,7 @@ services:
     ports: ["8000:8000"]
     environment:
       TAYEB_BIM_URL: http://bim-engine:8001
+      TAYEB_DB_PATH: /app/data/tayeb.db
     volumes: ["tayeb_data:/app/data"]
   bim-engine:
     image: python:3.12-slim
