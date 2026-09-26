@@ -12,6 +12,23 @@ def one(sql,args=()):
   x=c.execute(sql,args).fetchone();return dict(x) if x else None
 def audit(a,e,i):
  with connect() as c:c.execute("INSERT INTO audit_log(action,entity,entity_id) VALUES(?,?,?)",(a,e,i))
+def account_id(code):
+    a=one("SELECT id FROM accounts WHERE code=? AND active=1",(code,))
+    if not a: raise HTTPException(500,f"Required account {code} is not configured")
+    return a["id"]
+def post_system_journal(entry_no,entry_date,description,project_id,lines):
+    if any(l[1] < 0 or l[2] < 0 or (l[1] and l[2]) for l in lines): raise HTTPException(500,"Invalid system journal line")
+    debit=sum(l[1] for l in lines); credit=sum(l[2] for l in lines)
+    if abs(debit-credit)>0.000001: raise HTTPException(500,"System journal is not balanced")
+    with connect() as c:
+        existing=c.execute("SELECT id FROM journal_entries WHERE entry_no=?",(entry_no,)).fetchone()
+        if existing: return existing["id"]
+        jid=c.execute("INSERT INTO journal_entries(entry_no,entry_date,description,project_id,status,posted_at) VALUES(?,?,?,?,?,CURRENT_TIMESTAMP)",(entry_no,entry_date,description,project_id,"Posted")).lastrowid
+        for aid,debit_amt,credit_amt,desc,line_project in lines:
+            c.execute("INSERT INTO journal_lines(journal_id,account_id,debit,credit,description,project_id) VALUES(?,?,?,?,?,?)",(jid,aid,debit_amt,credit_amt,desc,line_project))
+    audit("post","journal_entry",jid)
+    return jid
+
 def insert(table,fields,values):
  try:
   with connect() as c:
@@ -113,18 +130,23 @@ def purchase_detail(purchase_id:int):
  return p
 @router.post("/purchases/{purchase_id}/receive")
 def receive_purchase(purchase_id:int):
- p=one("SELECT * FROM purchases WHERE id=?",(purchase_id,))
- if not p: raise HTTPException(404,"Purchase not found")
- if p["status"]=="Received": raise HTTPException(409,"Purchase already received")
- items=rows("SELECT * FROM purchase_items WHERE purchase_id=?",(purchase_id,))
- with connect() as c:
-  for item in items:
-   if item["material_id"] is not None:
-    c.execute("UPDATE materials SET stock=stock+? WHERE id=?",(item["quantity"],item["material_id"]))
-    c.execute("INSERT INTO material_moves(project_id,material_id,quantity,move_type,reference) VALUES(?,?,?,?,?)",(p["project_id"],item["material_id"],item["quantity"],"RECEIPT",p["reference"]))
-  c.execute("UPDATE purchases SET status='Received' WHERE id=?",(purchase_id,))
- audit("receive","purchase",purchase_id)
- return one("SELECT * FROM purchases WHERE id=?",(purchase_id,))
+    p=one("SELECT * FROM purchases WHERE id=?",(purchase_id,))
+    if not p: raise HTTPException(404,"Purchase not found")
+    if p["status"]=="Received": raise HTTPException(409,"Purchase already received")
+    items=rows("SELECT * FROM purchase_items WHERE purchase_id=?",(purchase_id,))
+    items_total=sum(x["quantity"]*x["unit_rate"] for x in items)
+    amount=p["amount"] or items_total
+    if amount<=0: raise HTTPException(422,"Purchase amount must be greater than zero")
+    with connect() as c:
+        for item in items:
+            if item["material_id"] is not None:
+                c.execute("UPDATE materials SET stock=stock+? WHERE id=?",(item["quantity"],item["material_id"]))
+                c.execute("INSERT INTO material_moves(project_id,material_id,quantity,move_type,reference) VALUES(?,?,?,?,?)",(p["project_id"],item["material_id"],item["quantity"],"RECEIPT",p["reference"]))
+        c.execute("UPDATE purchases SET status='Received',amount=? WHERE id=?",(amount,purchase_id))
+    post_system_journal("PUR-"+str(purchase_id),p["created_at"][:10] if p["created_at"] else "2099-01-01","Purchase receipt "+p["reference"],p["project_id"],[(account_id("1200"),amount,0,"Inventory receipt",p["project_id"]),(account_id("2000"),0,amount,"Supplier payable",p["project_id"])])
+    audit("receive","purchase",purchase_id)
+    return one("SELECT * FROM purchases WHERE id=?",(purchase_id,))
+
 @router.get("/subcontractors")
 def subcontractors(project_id:int|None=None):return rows("SELECT * FROM subcontractors WHERE project_id=COALESCE(?,project_id)",(project_id,))
 @router.post("/subcontractors")
@@ -196,9 +218,16 @@ def payroll_detail(period_id:int):
  return p
 @router.post("/payroll/periods/{period_id}/approve")
 def payroll_approve(period_id:int):
- if not one("SELECT id FROM payroll_periods WHERE id=?",(period_id,)): raise HTTPException(404,"Payroll period not found")
- with connect() as c:c.execute("UPDATE payroll_periods SET status='Approved' WHERE id=?",(period_id,))
- audit("approve","payroll_period",period_id); return one("SELECT * FROM payroll_periods WHERE id=?",(period_id,))
+    p=one("SELECT * FROM payroll_periods WHERE id=?",(period_id,))
+    if not p: raise HTTPException(404,"Payroll period not found")
+    if p["status"]=="Approved": return p
+    total=one("SELECT COALESCE(SUM(gross_amount),0)v FROM payroll_items WHERE period_id=?",(period_id,))["v"]
+    if total<=0: raise HTTPException(422,"Payroll period has no payable amount")
+    with connect() as c:c.execute("UPDATE payroll_periods SET status='Approved' WHERE id=?",(period_id,))
+    post_system_journal("PAYROLL-"+str(period_id),p["period_start"],"Payroll accrual "+str(period_id),None,[(account_id("5100"),total,0,"Payroll expense",None),(account_id("2100"),0,total,"Payroll payable",None)])
+    audit("approve","payroll_period",period_id)
+    return one("SELECT * FROM payroll_periods WHERE id=?",(period_id,))
+
 @router.post("/change-orders")
 def change_order(x:ChangeOrderIn): return insert("change_orders",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/change-orders")
@@ -206,7 +235,11 @@ def change_orders(project_id:int|None=None): return rows("SELECT * FROM change_o
 @router.post("/change-orders/{order_id}/approve")
 def approve_change_order(order_id:int):
  if not one("SELECT id FROM change_orders WHERE id=?",(order_id,)): raise HTTPException(404,"Change order not found")
- with connect() as c:c.execute("UPDATE change_orders SET status='Approved',approved_at=CURRENT_TIMESTAMP WHERE id=?",(order_id,))
+ with connect() as c:
+  co=c.execute("SELECT project_id,amount,status FROM change_orders WHERE id=?",(order_id,)).fetchone()
+  if co["status"]=="Approved": return one("SELECT * FROM change_orders WHERE id=?",(order_id,))
+  c.execute("UPDATE change_orders SET status='Approved',approved_at=CURRENT_TIMESTAMP WHERE id=?",(order_id,))
+  c.execute("UPDATE projects SET contract_value=contract_value+? WHERE id=?",(co["amount"],co["project_id"]))
  audit("approve","change_order",order_id); return one("SELECT * FROM change_orders WHERE id=?",(order_id,))
 @router.post("/progress")
 def progress(x:ProgressIn):
@@ -223,8 +256,14 @@ def progress_summary(pid:int):
  return rows("SELECT b.code,b.description,b.quantity planned_quantity,COALESCE(SUM(pe.quantity),0) executed_quantity,b.unit, b.quantity-COALESCE(SUM(pe.quantity),0) remaining_quantity FROM boq b LEFT JOIN progress_entries pe ON pe.boq_id=b.id AND pe.status!='Rejected' WHERE b.project_id=? GROUP BY b.id ORDER BY b.code",(pid,))
 @router.post("/billing-payments")
 def billing_payment(x:BillingPaymentIn):
- if not one("SELECT id FROM billings WHERE id=?",(x.billing_id,)): raise HTTPException(404,"Billing not found")
- return insert("billing_payments",["billing_id","payment_date","amount","reference"],list(x.model_dump().values()))
+    b=one("SELECT * FROM billings WHERE id=?",(x.billing_id,))
+    if not b: raise HTTPException(404,"Billing not found")
+    paid=one("SELECT COALESCE(SUM(amount),0)v FROM billing_payments WHERE billing_id=?",(x.billing_id,))["v"]
+    if paid+x.amount>b["gross_amount"]+0.000001: raise HTTPException(409,"Payment exceeds billing balance")
+    p=insert("billing_payments",["billing_id","payment_date","amount","reference"],list(x.model_dump().values()))
+    post_system_journal("PAY-"+str(p["id"]),x.payment_date,"Billing payment "+(x.reference or str(x.billing_id)),b["project_id"],[(account_id("1000"),x.amount,0,"Customer receipt",b["project_id"]),(account_id("1100"),0,x.amount,"Accounts receivable",b["project_id"])])
+    return p
+
 @router.get("/billings/{billing_id}/payments")
 def billing_payments(billing_id:int):
  b=one("SELECT * FROM billings WHERE id=?",(billing_id,))
@@ -248,6 +287,37 @@ def close_issue(issue_id:int):
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
 def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"payroll":True,"change_orders":True,"progress":True,"billing_payments":True,"documents":True,"issues":True,"bim_boundary":True}
+@router.post("/budgets")
+def create_budget(x:BudgetIn):
+    if not one("SELECT id FROM projects WHERE id=?",(x.project_id,)): raise HTTPException(404,"Project not found")
+    return insert("budgets",["project_id","code","description","amount","category"],[x.project_id,x.code,x.description,x.amount,x.category])
+
+@router.get("/budgets")
+def list_budgets(project_id:int|None=None):
+    return rows("SELECT * FROM budgets WHERE project_id=COALESCE(?,project_id) ORDER BY project_id,code",(project_id,))
+
+@router.get("/projects/{pid}/budget-vs-actual")
+def budget_vs_actual(pid:int):
+    if not one("SELECT id FROM projects WHERE id=?",(pid,)): raise HTTPException(404,"Project not found")
+    b=rows("SELECT category,SUM(amount) budget FROM budgets WHERE project_id=? GROUP BY category",(pid,))
+    actual=rows("""SELECT category,amount FROM (
+        SELECT 'Direct' category,COALESCE(SUM(amount),0) amount FROM cost_entries WHERE project_id=?
+        UNION ALL SELECT 'Purchases',COALESCE(SUM(amount),0) FROM purchases WHERE project_id=?
+        UNION ALL SELECT 'Equipment',COALESCE(SUM(cost),0) FROM equipment_logs WHERE project_id=?
+        UNION ALL SELECT 'Labour',COALESCE(SUM(a.hours*w.daily_rate/8),0) FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE a.project_id=? AND a.status NOT IN ('Absent','Leave')
+    )""",(pid,pid,pid,pid))
+    a={x["category"]:x["amount"] for x in actual}
+    return [{"category":x["category"],"budget":x["budget"],"actual":a.get(x["category"],0),"variance":x["budget"]-a.get(x["category"],0)} for x in b]
+
+@router.get("/accounting/profit-loss")
+def profit_loss(project_id:int|None=None):
+    params=(project_id,) if project_id is not None else ()
+    where=" AND j.project_id=?" if project_id is not None else ""
+    revenue=rows(f"""SELECT a.code,a.name,COALESCE(SUM(jl.credit-jl.debit),0) amount FROM accounts a JOIN journal_lines jl ON jl.account_id=a.id JOIN journal_entries j ON j.id=jl.journal_id WHERE j.status='Posted' AND a.account_type='Revenue'{where} GROUP BY a.id ORDER BY a.code""",params)
+    expenses=rows(f"""SELECT a.code,a.name,COALESCE(SUM(jl.debit-jl.credit),0) amount FROM accounts a JOIN journal_lines jl ON jl.account_id=a.id JOIN journal_entries j ON j.id=jl.journal_id WHERE j.status='Posted' AND a.account_type='Expense'{where} GROUP BY a.id ORDER BY a.code""",params)
+    rt=sum(x["amount"] for x in revenue); et=sum(x["amount"] for x in expenses)
+    return {"project_id":project_id,"revenue":revenue,"expenses":expenses,"total_revenue":rt,"total_expenses":et,"net_profit":rt-et}
+
 @router.post("/accounting/accounts")
 def create_account(x:AccountIn):
  if x.account_type not in {"Asset","Liability","Equity","Revenue","Expense"}: raise HTTPException(422,"Invalid account type")
