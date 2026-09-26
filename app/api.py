@@ -167,7 +167,16 @@ def financial_summary(pid:int):
  costs_total=one("SELECT COALESCE(SUM(amount),0)v FROM cost_entries WHERE project_id=?",(pid,))["v"]
  purchases=one("SELECT COALESCE(SUM(amount),0)v FROM purchases WHERE project_id=?",(pid,))["v"]
  equipment=one("SELECT COALESCE(SUM(cost),0)v FROM equipment_logs WHERE project_id=?",(pid,))["v"]
- return {"contract_value":contract,"boq_value":boq,"billed":billed,"cash_in":cash_in,"cash_out":cash_out,"direct_costs":costs_total,"purchases":purchases,"equipment_cost":equipment,"estimated_cost":costs_total+purchases+equipment,"remaining_contract":contract-billed}
+ labour=one("SELECT COALESCE(SUM(a.hours*w.daily_rate/8),0)v FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE a.project_id=? AND a.status NOT IN ('Absent','Leave')",(pid,))["v"]
+ materials=one("SELECT COALESCE(SUM(mm.quantity*m.unit_cost),0)v FROM material_moves mm JOIN materials m ON m.id=mm.material_id WHERE mm.project_id=? AND mm.move_type IN ('CONSUMPTION','ISSUE','TRANSFER_OUT')",(pid,))["v"]
+ subcontract=one("SELECT COALESCE(SUM(contract_value),0)v FROM subcontractors WHERE project_id=? AND status!='Cancelled'",(pid,))["v"]
+ estimated=costs_total+purchases+equipment+labour+materials+subcontract
+ return {"contract_value":contract,"boq_value":boq,"billed":billed,"cash_in":cash_in,"cash_out":cash_out,"direct_costs":costs_total,"purchases":purchases,"equipment_cost":equipment,"labour_cost":labour,"material_consumption_cost":materials,"subcontract_value":subcontract,"estimated_cost":estimated,"estimated_margin":contract-estimated,"remaining_contract":contract-billed}
+@router.get("/projects/{pid}/cost-breakdown")
+def cost_breakdown(pid:int):
+ if not one("SELECT id FROM projects WHERE id=?",(pid,)): raise HTTPException(404,"Project not found")
+ s=financial_summary(pid)
+ return {"project_id":pid,"breakdown":{"direct":s["direct_costs"],"purchases":s["purchases"],"equipment":s["equipment_cost"],"labour":s["labour_cost"],"materials":s["material_consumption_cost"],"subcontractors":s["subcontract_value"]},"total_estimated_cost":s["estimated_cost"]}
 @router.get("/audit")
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
