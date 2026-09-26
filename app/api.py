@@ -1,7 +1,9 @@
 import json,os,urllib.request
-from fastapi import APIRouter,HTTPException
+from fastapi import APIRouter,HTTPException,Request
 from .db import connect
 from .models import *
+from .auth import create_password,verify_password,issue_token,require_permission
+
 router=APIRouter()
 def rows(sql,args=()):
  with connect() as c:return [dict(x) for x in c.execute(sql,args).fetchall()]
@@ -16,6 +18,25 @@ def insert(table,fields,values):
    cur=c.execute(f"INSERT INTO {table}({','.join(fields)}) VALUES({','.join('?'*len(values))})",values);i=cur.lastrowid
   audit("create",table,i);return one(f"SELECT * FROM {table} WHERE id=?",(i,))
  except Exception as e: raise HTTPException(409,str(e))
+@router.post("/auth/login")
+def login(x:LoginIn):
+ u=one("SELECT * FROM users WHERE username=? AND active=1",(x.username,))
+ if not u or not verify_password(x.password,u["password_hash"]): raise HTTPException(401,"Invalid credentials")
+ return {"access_token":issue_token(str(u["id"]),u["role"]),"token_type":"bearer","expires_in":43200,"user":{"id":u["id"],"username":u["username"],"role":u["role"]}}
+@router.get("/auth/me")
+def me(request:Request):
+ return require_permission(request,"projects") | {"ok":True}
+@router.get("/auth/users")
+def users(request:Request):
+ user=require_permission(request,"*")
+ if user["role"] not in {"owner","admin"}: raise HTTPException(403,"Admin access required")
+ return rows("SELECT id,username,role,active,created_at FROM users ORDER BY id")
+@router.post("/auth/users")
+def create_user(x:UserIn,request:Request):
+ user=require_permission(request,"*")
+ if user["role"] not in {"owner","admin"}: raise HTTPException(403,"Admin access required")
+ if x.role not in {"owner","admin","project_manager","engineer","accountant","site_manager","viewer"}: raise HTTPException(422,"Invalid role")
+ return insert("users",["username","password_hash","role"],[x.username,create_password(x.password),x.role])
 @router.get("/dashboard")
 def dashboard():
  p=rows("SELECT * FROM projects")
