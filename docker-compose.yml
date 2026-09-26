@@ -6,10 +6,11 @@ services:
     environment:
       TAYEB_BIM_URL: http://bim-engine:8001
       TAYEB_DB_PATH: /app/data/tayeb.db
+      TAYEB_STORAGE_PATH: /app/storage
       TAYEB_AUTH_SECRET: ${TAYEB_AUTH_SECRET:?Set TAYEB_AUTH_SECRET in .env}
       TAYEB_BOOTSTRAP_PASSWORD: ${TAYEB_BOOTSTRAP_PASSWORD:?Set TAYEB_BOOTSTRAP_PASSWORD in .env}
       TAYEB_API_TOKEN: ${TAYEB_API_TOKEN:-}
-    volumes: ["tayeb_data:/app/data"]
+    volumes: ["tayeb_data:/app/data","tayeb_storage:/app/storage"]
     depends_on: [bim-engine]
   bim-engine:
     image: python:3.12-slim
@@ -19,3 +20,4 @@ services:
     volumes: ["./services/bim-engine:/srv"]
 volumes:
   tayeb_data:
+  tayeb_storage:
