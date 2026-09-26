@@ -73,6 +73,48 @@ def set_user_active(user_id:int,x:UserStatusIn,request:Request):
  with connect() as c:c.execute("UPDATE users SET active=? WHERE id=?",(1 if x.active else 0,user_id))
  audit("activate" if x.active else "deactivate","user",user_id)
  return one("SELECT id,username,role,active,created_at FROM users WHERE id=?",(user_id,))
+@router.get("/auth/users/{user_id}/projects")
+def user_projects(user_id:int,request:Request):
+    user=require_permission(request,"*")
+    if user["role"] not in {"owner","admin"}: raise HTTPException(403,"Admin access required")
+    if not one("SELECT id FROM users WHERE id=?",(user_id,)): raise HTTPException(404,"User not found")
+    return rows("""SELECT p.*,pm.member_role,pm.created_at member_since
+                   FROM project_members pm JOIN projects p ON p.id=pm.project_id
+                   WHERE pm.user_id=? ORDER BY p.id DESC""",(user_id,))
+
+@router.post("/auth/users/{user_id}/projects/{project_id}")
+def add_user_project(user_id:int,project_id:int,request:Request):
+    user=require_permission(request,"*")
+    if user["role"] not in {"owner","admin"}: raise HTTPException(403,"Admin access required")
+    if not one("SELECT id FROM users WHERE id=? AND active=1",(user_id,)): raise HTTPException(404,"Active user not found")
+    if not one("SELECT id FROM projects WHERE id=?",(project_id,)): raise HTTPException(404,"Project not found")
+    try:
+        with connect() as c:
+            mid=c.execute("INSERT INTO project_members(project_id,user_id) VALUES(?,?)",(project_id,user_id)).lastrowid
+    except Exception: raise HTTPException(409,"User is already assigned to this project")
+    audit("assign","project_member",mid)
+    return one("""SELECT pm.*,p.code project_code,p.name project_name,u.username
+                  FROM project_members pm JOIN projects p ON p.id=pm.project_id JOIN users u ON u.id=pm.user_id
+                  WHERE pm.id=?""",(mid,))
+
+@router.delete("/auth/users/{user_id}/projects/{project_id}")
+def remove_user_project(user_id:int,project_id:int,request:Request):
+    user=require_permission(request,"*")
+    if user["role"] not in {"owner","admin"}: raise HTTPException(403,"Admin access required")
+    with connect() as c:
+        cur=c.execute("DELETE FROM project_members WHERE user_id=? AND project_id=?",(user_id,project_id))
+    if not cur.rowcount: raise HTTPException(404,"Project assignment not found")
+    audit("unassign","project_member",user_id)
+    return {"ok":True}
+
+@router.get("/projects/{pid}/members")
+def project_members(pid:int,request:Request):
+    require_permission(request,"projects")
+    if not one("SELECT id FROM projects WHERE id=?",(pid,)): raise HTTPException(404,"Project not found")
+    return rows("""SELECT u.id,u.username,u.role,u.active,pm.member_role,pm.created_at
+                   FROM project_members pm JOIN users u ON u.id=pm.user_id
+                   WHERE pm.project_id=? ORDER BY u.username""",(pid,))
+
 @router.get("/dashboard")
 def dashboard():
  p=rows("SELECT * FROM projects")
