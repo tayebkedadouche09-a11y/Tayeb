@@ -98,13 +98,19 @@ def test_supplier_payroll_budget_and_reversal():
 
 
 def test_project_membership_model():
-    p=c.post("/api/projects",json={"code":"PM-"+uuid.uuid4().hex[:8],"name":"Membership Project"}).json()
-    w=c.post("/api/auth/users",json={"username":"member-"+uuid.uuid4().hex[:6],"password":"StrongPass123!","role":"engineer"})
+    os.environ["TAYEB_AUTH_SECRET"]="test-secret"
+    from app.auth import create_password,issue_token
+    with db.connect() as conn:
+        conn.execute("INSERT INTO users(username,password_hash,role,active) VALUES(?,?,?,1)",("test-owner",create_password("OwnerPass123!"),"owner"))
+        owner_id=conn.execute("SELECT id FROM users WHERE username=?",("test-owner",)).fetchone()["id"]
+    headers={"Authorization":"Bearer "+issue_token(str(owner_id),"owner")}
+    p=c.post("/api/projects",json={"code":"PM-"+uuid.uuid4().hex[:8],"name":"Membership Project"},headers=headers).json()
+    w=c.post("/api/auth/users",json={"username":"member-"+uuid.uuid4().hex[:6],"password":"StrongPass123!","role":"engineer"},headers=headers)
     assert w.status_code==200
     uid=w.json()["id"]
-    assigned=c.post(f"/api/auth/users/{uid}/projects/{p['id']}")
+    assigned=c.post(f"/api/auth/users/{uid}/projects/{p['id']}",headers=headers)
     assert assigned.status_code==200
-    assert c.get(f"/api/projects/{p['id']}/members").status_code==200
-    assert c.get(f"/api/auth/users/{uid}/projects").json()[0]["id"]==p["id"]
-    assert c.post(f"/api/auth/users/{uid}/projects/{p['id']}").status_code==409
-    assert c.delete(f"/api/auth/users/{uid}/projects/{p['id']}").status_code==200
+    assert c.get(f"/api/projects/{p['id']}/members",headers=headers).status_code==200
+    assert c.get(f"/api/auth/users/{uid}/projects",headers=headers).json()[0]["id"]==p["id"]
+    assert c.post(f"/api/auth/users/{uid}/projects/{p['id']}",headers=headers).status_code==409
+    assert c.delete(f"/api/auth/users/{uid}/projects/{p['id']}",headers=headers).status_code==200
