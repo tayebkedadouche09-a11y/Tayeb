@@ -39,7 +39,17 @@ def verify_token(token):
 def current_user(request:Request):
  auth=request.headers.get("authorization","")
  if not auth.startswith("Bearer "): return None
- return verify_token(auth[7:].strip())
+ token_user=verify_token(auth[7:].strip())
+ if not token_user: return None
+ if token_user.get("sub") == "legacy": return token_user
+ try:
+  with connect() as c:
+   db_user=c.execute("SELECT id,role,active FROM users WHERE id=?",(int(token_user["sub"]),)).fetchone()
+  if not db_user or not db_user["active"] or db_user["role"] != token_user.get("role"):
+   return None
+ except Exception:
+  return None
+ return token_user
 def require_permission(request:Request,permission):
  user=current_user(request)
  if user is None: raise HTTPException(401,"Authentication required")
