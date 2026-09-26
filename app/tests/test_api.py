@@ -44,3 +44,15 @@ def test_accounting_flow():
  assert c.post(f"/api/accounting/journals/{j['id']}/post").json()["status"]=="Posted"
  tb=c.get("/api/accounting/trial-balance").json()
  assert any(x["code"]==cash["code"] and x["balance"]==1000 for x in tb)
+
+def test_finance_integrations():
+    p=c.post("/api/projects",json={"code":"FI-"+uuid.uuid4().hex[:8],"name":"Finance Integrations","contract_value":10000}).json()
+    inv=c.post("/api/billings",json={"project_id":p["id"],"invoice_no":"FI-I-"+uuid.uuid4().hex[:6],"gross_amount":1000}).json()
+    assert c.post("/api/billing-payments",json={"billing_id":inv["id"],"payment_date":"2026-09-26","amount":400}).status_code==200
+    pl=c.get("/api/accounting/profit-loss").json()
+    assert pl["total_revenue"] >= 0
+    b=c.post("/api/budgets",json={"project_id":p["id"],"code":"LAB","amount":500,"category":"Labour"}).json()
+    assert b["amount"]==500
+    co=c.post("/api/change-orders",json={"project_id":p["id"],"code":"CO-FI","description":"Extra","amount":250}).json()
+    assert c.post(f"/api/change-orders/{co['id']}/approve").json()["status"]=="Approved"
+    assert c.get(f"/api/projects/{p['id']}").json()["contract_value"]==10250
