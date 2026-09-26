@@ -1,8 +1,10 @@
 import json,os,urllib.request
-from fastapi import APIRouter,HTTPException,Request
+from fastapi import APIRouter,HTTPException,Request,UploadFile,File
 from .db import connect
 from .models import *
 from .auth import create_password,verify_password,issue_token,require_permission
+from pathlib import Path
+import uuid
 
 router=APIRouter()
 def rows(sql,args=()):
@@ -270,6 +272,42 @@ def billing_payments(billing_id:int):
  if not b: raise HTTPException(404,"Billing not found")
  ps=rows("SELECT * FROM billing_payments WHERE billing_id=? ORDER BY payment_date",(billing_id,))
  return {"billing":b,"payments":ps,"paid":sum(x["amount"] for x in ps),"balance":b["gross_amount"]-sum(x["amount"] for x in ps)}
+@router.post("/documents/upload")
+async def upload_document(project_id:int|None=None,document_type:str="file",file:UploadFile=File(...)):
+    if project_id is not None and not one("SELECT id FROM projects WHERE id=?",(project_id,)): raise HTTPException(404,"Project not found")
+    root=Path(os.getenv("TAYEB_STORAGE_PATH",str(Path(__file__).resolve().parent/"storage"))).resolve()
+    root.mkdir(parents=True,exist_ok=True)
+    suffix=Path(file.filename or "").suffix[:20]
+    stored_name=uuid.uuid4().hex+suffix
+    target=(root/stored_name).resolve()
+    if root not in target.parents: raise HTTPException(400,"Invalid file path")
+    size=0
+    try:
+        with target.open("wb") as out:
+            while True:
+                chunk=await file.read(1024*1024)
+                if not chunk: break
+                size+=len(chunk)
+                if size>25*1024*1024:
+                    target.unlink(missing_ok=True)
+                    raise HTTPException(413,"File exceeds 25 MB limit")
+                out.write(chunk)
+    finally:
+        await file.close()
+    uri="file://"+str(target)
+    return insert("documents",["project_id","document_type","name","storage_uri"],[project_id,document_type,file.filename or stored_name,uri])
+
+@router.get("/documents/{document_id}/download")
+def download_document(document_id:int):
+    from fastapi.responses import FileResponse
+    d=one("SELECT * FROM documents WHERE id=?",(document_id,))
+    if not d: raise HTTPException(404,"Document not found")
+    if not d["storage_uri"].startswith("file://"): raise HTTPException(409,"Document is stored in an external location")
+    root=Path(os.getenv("TAYEB_STORAGE_PATH",str(Path(__file__).resolve().parent/"storage"))).resolve()
+    target=Path(d["storage_uri"][7:]).resolve()
+    if root not in target.parents or not target.is_file(): raise HTTPException(404,"Stored file not found")
+    return FileResponse(target,filename=d["name"])
+
 @router.post("/documents")
 def document(x:DocumentIn): return insert("documents",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/documents")
