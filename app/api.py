@@ -334,7 +334,7 @@ def close_issue(issue_id:int):
 @router.get("/audit")
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
-def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"payroll":True,"change_orders":True,"progress":True,"billing_payments":True,"documents":True,"issues":True,"bim_boundary":True}
+def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"supplier_invoices":True,"supplier_payments":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"payroll":True,"payroll_allocations":True,"change_orders":True,"progress":True,"billing_payments":True,"documents":True,"issues":True,"budgets":True,"budget_versions":True,"accounting":True,"journal_reversals":True,"cost_reconciliation":True,"bim_boundary":True}
 @router.post("/accounting/fiscal-periods")
 def create_fiscal_period(x:FiscalPeriodIn):
  if x.start_date>x.end_date: raise HTTPException(422,"Start date must not be after end date")
