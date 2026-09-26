@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS journal_entries(id INTEGER PRIMARY KEY,entry_no TEXT 
 CREATE TABLE IF NOT EXISTS journal_lines(id INTEGER PRIMARY KEY,journal_id INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,account_id INTEGER NOT NULL REFERENCES accounts(id),debit REAL DEFAULT 0,credit REAL DEFAULT 0,description TEXT DEFAULT '',project_id INTEGER REFERENCES projects(id),UNIQUE(journal_id,id));
 CREATE TABLE IF NOT EXISTS budgets(id INTEGER PRIMARY KEY,project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,code TEXT NOT NULL,description TEXT DEFAULT '',amount REAL NOT NULL DEFAULT 0,category TEXT DEFAULT 'General',UNIQUE(project_id,code));
 CREATE TABLE IF NOT EXISTS fiscal_periods(id INTEGER PRIMARY KEY,code TEXT UNIQUE NOT NULL,start_date TEXT NOT NULL,end_date TEXT NOT NULL,status TEXT DEFAULT 'Open',closed_at TEXT);
+CREATE TABLE IF NOT EXISTS project_members(id INTEGER PRIMARY KEY,project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,member_role TEXT DEFAULT 'member',created_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(project_id,user_id));
+CREATE INDEX IF NOT EXISTS idx_project_members_project ON project_members(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_members_user ON project_members(user_id);
 CREATE INDEX IF NOT EXISTS idx_journal_lines_account ON journal_lines(account_id);
 CREATE INDEX IF NOT EXISTS idx_journal_entries_project ON journal_entries(project_id);
 CREATE INDEX IF NOT EXISTS idx_cost_entries_project ON cost_entries(project_id);
