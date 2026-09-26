@@ -22,7 +22,7 @@ The commercial-suite component is intentionally isolated until its v15 models ar
 
 ## Application layer
 
-The Tayeb-owned application currently covers projects, tasks, BOQ, labour, attendance, equipment, materials/inventory movements, procurement, subcontractors, site reports, billing/retention, cash flow, cost entries, audit logging and a BIM job boundary. It also includes local authentication with roles: owner, admin, project_manager, engineer, accountant, site_manager and viewer.
+The Tayeb-owned application currently covers projects, tasks, BOQ, labour, attendance, equipment, materials/inventory movements, procurement, subcontractors, site reports, billing/retention, cash flow, cost entries, audit logging and a BIM job boundary. It also includes local authentication with roles: owner, admin, project_manager, engineer, accountant, site_manager and viewer, plus basic double-entry accounting, payroll approval journals, purchase-receipt journals, billing-payment journals, budgets and budget-vs-actual reporting.
 
 ### Authentication
 
@@ -52,4 +52,4 @@ The MIT reference applications remain documented separately. The AGPL BIM refere
 
 ## Current status
 
-This is an active construction ERP foundation, not a claim that every enterprise module is finished. Full accounting/GL, payroll, document management, migrations, production BIM processing, advanced scheduling and several enterprise workflows remain future implementation work.
+This is an active construction ERP foundation, not a claim that every enterprise module is finished. The current accounting layer is a foundation: chart of accounts, balanced journals, posting, trial balance and a basic profit-and-loss report are implemented. Budgeting and several operational-to-accounting integrations are also present. Fiscal periods/closing, VAT/tax rules, reversals, full document storage, migrations, production BIM processing, advanced scheduling and deeper enterprise workflows remain future implementation work.
