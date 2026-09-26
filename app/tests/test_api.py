@@ -64,3 +64,24 @@ def test_fiscal_period_and_invoice_accounting():
  assert inv["net_amount"]==1140
  assert c.post("/api/billing-payments",json={"billing_id":inv["id"],"payment_date":"2026-09-26","amount":1140}).status_code==200
  assert c.post(f"/api/accounting/fiscal-periods/{fp['id']}/close").status_code==200
+
+def test_supplier_payroll_budget_and_reversal():
+    p=c.post("/api/projects",json={"code":"EXT-"+uuid.uuid4().hex[:8],"name":"Extended Finance","contract_value":20000}).json()
+    si=c.post("/api/supplier-invoices",json={"project_id":p["id"],"supplier":"Supplier A","invoice_no":"S-"+uuid.uuid4().hex[:8],"invoice_date":"2026-09-26","amount":1000,"tax_amount":190}).json()
+    assert si["status"]=="Open"
+    assert c.post("/api/supplier-payments",json={"supplier_invoice_id":si["id"],"payment_date":"2026-09-26","amount":1190}).status_code==200
+    assert c.get(f"/api/supplier-invoices/{si['id']}").json()["balance"]==0
+    w=c.post("/api/workers",json={"code":"EW-"+uuid.uuid4().hex[:6],"name":"Allocated Worker","daily_rate":160}).json()
+    period=c.post("/api/payroll/periods",json={"period_start":"2026-09-01","period_end":"2026-09-30"}).json()
+    item=c.post(f"/api/payroll/periods/{period['id']}/items",json={"worker_id":w["id"],"regular_hours":16}).json()
+    assert c.post(f"/api/payroll/periods/{period['id']}/approve").status_code==200
+    assert c.post("/api/payroll/allocations",json={"payroll_item_id":item["id"],"project_id":p["id"],"hours":16,"amount":320}).status_code==200
+    c.post("/api/budgets",json={"project_id":p["id"],"code":"MAT","amount":1000,"category":"Materials"})
+    ver=c.post("/api/budgets/versions",json={"project_id":p["id"],"notes":"Baseline"}).json()
+    assert ver["version_no"]==1 and len(ver["items"])==1
+    cash=c.post("/api/accounting/accounts",json={"code":"REV-"+uuid.uuid4().hex[:5],"name":"Reversal Cash","account_type":"Asset"}).json()
+    rev=c.post("/api/accounting/accounts",json={"code":"REV-R-"+uuid.uuid4().hex[:5],"name":"Reversal Revenue","account_type":"Revenue"}).json()
+    j=c.post("/api/accounting/journals",json={"entry_no":"RJE-"+uuid.uuid4().hex[:8],"entry_date":"2026-09-26","lines":[{"account_id":cash["id"],"debit":100},{"account_id":rev["id"],"credit":100}]}).json()
+    c.post(f"/api/accounting/journals/{j['id']}/post")
+    rj=c.post(f"/api/accounting/journals/{j['id']}/reverse",json={"reason":"Correction"}).json()
+    assert rj["status"]=="Posted" and rj["total_debit"]==100 and rj["total_credit"]==100
