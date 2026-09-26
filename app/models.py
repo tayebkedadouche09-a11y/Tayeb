@@ -37,3 +37,6 @@ class JournalEntryIn(BaseModel):
 
 class BudgetIn(BaseModel):
  project_id:int; code:str; description:str=""; amount:float=Field(0,ge=0); category:str="General"
+
+class FiscalPeriodIn(BaseModel):
+ code:str; start_date:str; end_date:str
