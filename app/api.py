@@ -255,7 +255,7 @@ def progress(x:ProgressIn):
  if not one("SELECT id FROM projects WHERE id=?",(x.project_id,)): raise HTTPException(404,"Project not found")
  b=one("SELECT project_id,unit_rate FROM boq WHERE id=?",(x.boq_id,))
  if not b or b["project_id"]!=x.project_id: raise HTTPException(404,"BOQ item not found")
- rate=x.unit_rate or b["unit_rate"]
+ rate=b["unit_rate"] if x.unit_rate is None else x.unit_rate
  return insert("progress_entries",["project_id","boq_id","report_date","quantity","unit_rate","amount","status"],[x.project_id,x.boq_id,x.report_date,x.quantity,rate,x.quantity*rate,x.status])
 @router.get("/progress")
 def progress_list(project_id:int|None=None): return rows("SELECT pe.*,b.code boq_code,b.description FROM progress_entries pe JOIN boq b ON b.id=pe.boq_id WHERE pe.project_id=COALESCE(?,pe.project_id) ORDER BY report_date DESC",(project_id,))
