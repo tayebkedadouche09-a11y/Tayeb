@@ -27,3 +27,10 @@ class ProgressIn(BaseModel): project_id:int; boq_id:int; report_date:str; quanti
 class BillingPaymentIn(BaseModel): billing_id:int; payment_date:str; amount:float=Field(gt=0); reference:str=""
 class DocumentIn(BaseModel): project_id:Optional[int]=None; document_type:str; name:str; storage_uri:str; version:int=Field(1,ge=1)
 class IssueIn(BaseModel): project_id:int; title:str; description:str=""; severity:str="Medium"; status:str="Open"; due_date:Optional[str]=None
+
+class AccountIn(BaseModel):
+ code:str; name:str; account_type:str; parent_id:Optional[int]=None
+class JournalLineIn(BaseModel):
+ account_id:int; debit:float=Field(0,ge=0); credit:float=Field(0,ge=0); description:str=""; project_id:Optional[int]=None
+class JournalEntryIn(BaseModel):
+ entry_no:str; entry_date:str; description:str=""; project_id:Optional[int]=None; lines:list[JournalLineIn]=Field(min_length=2)
