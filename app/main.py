@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse,JSONResponse
 from pathlib import Path
 from .db import init_db
 from .api import router
-from .auth import bootstrap_owner,verify_token,PERMISSIONS
+from .auth import bootstrap_owner,current_user,PERMISSIONS
 
 app=FastAPI(title="Tayeb Construction ERP",version="1.1.0",docs_url="/docs",redoc_url="/redoc")
 app.include_router(router,prefix="/api")
@@ -25,14 +25,17 @@ async def api_guard(request:Request,call_next):
         if auth_enabled:
             if legacy and supplied==f"Bearer {legacy}":
                 user={"sub":"legacy","role":"owner"}
-            elif supplied.startswith("Bearer ") and (user:=verify_token(supplied[7:].strip())):
-                pass
             else:
-                return JSONResponse({"detail":"Authentication required"},status_code=401)
+                user=current_user(request)
+                if user is None:
+                    return JSONResponse({"detail":"Authentication required"},status_code=401)
             perm=next((v for k,v in PERM_BY_PATH.items() if path==k or path.startswith(k+"/")),None)
+            if perm is None and user["role"] not in {"owner","admin"} and not path.startswith("/api/auth/"):
+                return JSONResponse({"detail":"Permission denied"},status_code=403)
             if perm and user["role"] not in {"owner","admin"} and perm not in PERMISSIONS.get(user["role"],set()):
                 return JSONResponse({"detail":"Permission denied"},status_code=403)
     return await call_next(request)
+
 @app.on_event("startup")
 def startup():
     init_db()
