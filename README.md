@@ -53,3 +53,25 @@ The MIT reference applications remain documented separately. The AGPL BIM refere
 ## Current status
 
 This is an active construction ERP foundation, not a claim that every enterprise module is finished. The current accounting layer is a foundation: chart of accounts, balanced journals, posting, trial balance and a basic profit-and-loss report are implemented. Budgeting and several operational-to-accounting integrations are also present. Fiscal periods/closing and basic invoice tax/retention accounting are included. Reversals, jurisdiction-specific VAT rules, full document lifecycle/versioning, migrations, production BIM processing, advanced scheduling and deeper enterprise workflows remain future implementation work.
+
+
+## Finance controls added
+
+The application now includes:
+- supplier invoices and supplier payment lifecycle with AP/cash journals;
+- payroll allocation from approved payroll items to projects;
+- budget version snapshots;
+- posted journal reversal with an auditable reversal link;
+- project operational-cost vs posted-accounting-expense reconciliation;
+- balance-sheet account balances;
+- document upload metadata (MIME type, size, SHA-256 checksum) with the existing 25 MB limit.
+
+These controls are additive to the existing construction workflow: projects → BOQ → progress → procurement/materials → labour/equipment → billing → collections → accounting.
+
+### Accounting scope
+
+The accounting layer is a construction-oriented operational ledger, not a jurisdiction-specific statutory accounting package. Tax/VAT rates, returns, withholding, payroll statutory deductions, multi-currency, year-end closing entries, and local Algerian reporting still require a dedicated localization layer and validation before production statutory use.
+
+### Verification status
+
+CI is configured in `.github/workflows/ci.yml`. The GitHub API did not report a workflow run for the latest commit at the time of this update, so the new test suite has **not** been claimed as passing. Run `cd app && pip install -r requirements.txt && pytest -q` locally or wait for the repository's Actions runner to execute the push workflow.
