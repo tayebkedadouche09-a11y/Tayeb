@@ -166,9 +166,21 @@ def billing(x:BillingIn):
  post_system_journal("INV-"+str(i["id"]),i["created_at"][:10] if i["created_at"] else "2099-01-01","Invoice "+x.invoice_no,x.project_id,lines)
  i["retention_amount"]=retention; i["net_amount"]=net; return i
 @router.get("/billings")
-def billings(project_id:int|None=None):return rows("SELECT *,gross_amount*retention_percent/100 retention_amount,gross_amount-gross_amount*retention_percent/100+tax_amount net_amount FROM billings WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
+def billings(project_id:int|None=None):return rows("""SELECT *,
+                 gross_amount*retention_percent/100 retention_amount,
+                 gross_amount-gross_amount*retention_percent/100+tax_amount net_amount,
+                 COALESCE((SELECT SUM(bp.amount) FROM billing_payments bp WHERE bp.billing_id=billings.id),0) paid,
+                 CASE
+                   WHEN COALESCE((SELECT SUM(bp.amount) FROM billing_payments bp WHERE bp.billing_id=billings.id),0) >= gross_amount-gross_amount*retention_percent/100+tax_amount THEN 'Paid'
+                   WHEN COALESCE((SELECT SUM(bp.amount) FROM billing_payments bp WHERE bp.billing_id=billings.id),0) > 0 THEN 'Partially Paid'
+                   ELSE status
+                 END effective_status
+                 FROM billings WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC""",(project_id,))
 @router.post("/cashflow")
-def cashflow(x:CashflowIn):return insert("cashflow",list(x.model_dump().keys()),list(x.model_dump().values()))
+def cashflow(x:CashflowIn):
+    if x.direction not in {"IN","OUT"}: raise HTTPException(422,"Direction must be IN or OUT")
+    if not one("SELECT id FROM projects WHERE id=?",(x.project_id,)): raise HTTPException(404,"Project not found")
+    return insert("cashflow",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/cashflow")
 def cashflow_list(project_id:int|None=None):return rows("SELECT * FROM cashflow WHERE project_id=COALESCE(?,project_id) ORDER BY entry_date DESC",(project_id,))
 @router.get("/bim/jobs")
@@ -288,6 +300,11 @@ async def upload_document(project_id:int|None=None,document_type:str="file",file
     if project_id is not None and not one("SELECT id FROM projects WHERE id=?",(project_id,)): raise HTTPException(404,"Project not found")
     root=Path(os.getenv("TAYEB_STORAGE_PATH",str(Path(__file__).resolve().parent/"storage"))).resolve()
     root.mkdir(parents=True,exist_ok=True)
+    allowed_types={"application/pdf","image/png","image/jpeg","image/webp","application/zip",
+                   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                   "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}
+    if file.content_type not in allowed_types:
+        raise HTTPException(415,"Unsupported document type")
     suffix=Path(file.filename or "").suffix[:20]
     stored_name=uuid.uuid4().hex+suffix
     target=(root/stored_name).resolve()
