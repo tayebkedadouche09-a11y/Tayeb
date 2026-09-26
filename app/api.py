@@ -99,6 +99,32 @@ def material_move(x:MaterialMoveIn):
 def purchases(project_id:int|None=None):return rows("SELECT * FROM purchases WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
 @router.post("/purchases")
 def purchase(x:PurchaseIn):return insert("purchases",list(x.model_dump().keys()),list(x.model_dump().values()))
+@router.post("/purchases/{purchase_id}/items")
+def purchase_item(purchase_id:int,x:PurchaseItemIn):
+ if not one("SELECT id FROM purchases WHERE id=?",(purchase_id,)): raise HTTPException(404,"Purchase not found")
+ if x.material_id is not None and not one("SELECT id FROM materials WHERE id=?",(x.material_id,)): raise HTTPException(404,"Material not found")
+ return insert("purchase_items",["purchase_id","material_id","description","quantity","unit_rate"],[purchase_id,x.material_id,x.description,x.quantity,x.unit_rate])
+@router.get("/purchases/{purchase_id}")
+def purchase_detail(purchase_id:int):
+ p=one("SELECT * FROM purchases WHERE id=?",(purchase_id,))
+ if not p: raise HTTPException(404,"Purchase not found")
+ p["items"]=rows("SELECT pi.*,m.code material_code,m.name material_name,pi.quantity*pi.unit_rate amount FROM purchase_items pi LEFT JOIN materials m ON m.id=pi.material_id WHERE pi.purchase_id=?",(purchase_id,))
+ p["items_total"]=sum(x["amount"] for x in p["items"])
+ return p
+@router.post("/purchases/{purchase_id}/receive")
+def receive_purchase(purchase_id:int):
+ p=one("SELECT * FROM purchases WHERE id=?",(purchase_id,))
+ if not p: raise HTTPException(404,"Purchase not found")
+ if p["status"]=="Received": raise HTTPException(409,"Purchase already received")
+ items=rows("SELECT * FROM purchase_items WHERE purchase_id=?",(purchase_id,))
+ with connect() as c:
+  for item in items:
+   if item["material_id"] is not None:
+    c.execute("UPDATE materials SET stock=stock+? WHERE id=?",(item["quantity"],item["material_id"]))
+    c.execute("INSERT INTO material_moves(project_id,material_id,quantity,move_type,reference) VALUES(?,?,?,?,?)",(p["project_id"],item["material_id"],item["quantity"],"RECEIPT",p["reference"]))
+  c.execute("UPDATE purchases SET status='Received' WHERE id=?",(purchase_id,))
+ audit("receive","purchase",purchase_id)
+ return one("SELECT * FROM purchases WHERE id=?",(purchase_id,))
 @router.get("/subcontractors")
 def subcontractors(project_id:int|None=None):return rows("SELECT * FROM subcontractors WHERE project_id=COALESCE(?,project_id)",(project_id,))
 @router.post("/subcontractors")
