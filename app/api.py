@@ -248,3 +248,40 @@ def close_issue(issue_id:int):
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")
 def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"payroll":True,"change_orders":True,"progress":True,"billing_payments":True,"documents":True,"issues":True,"bim_boundary":True}
+@router.post("/accounting/accounts")
+def create_account(x:AccountIn):
+ if x.account_type not in {"Asset","Liability","Equity","Revenue","Expense"}: raise HTTPException(422,"Invalid account type")
+ if x.parent_id is not None and not one("SELECT id FROM accounts WHERE id=? AND active=1",(x.parent_id,)): raise HTTPException(404,"Parent account not found")
+ return insert("accounts",["code","name","account_type","parent_id"],[x.code,x.name,x.account_type,x.parent_id])
+@router.get("/accounting/accounts")
+def list_accounts(): return rows("SELECT * FROM accounts WHERE active=1 ORDER BY code")
+@router.post("/accounting/journals")
+def create_journal(x:JournalEntryIn):
+ if any((l.debit>0 and l.credit>0) or (l.debit==0 and l.credit==0) for l in x.lines): raise HTTPException(422,"Each line must contain either debit or credit")
+ if abs(sum(l.debit for l in x.lines)-sum(l.credit for l in x.lines))>0.000001: raise HTTPException(422,"Journal is not balanced")
+ with connect() as c:
+  jid=c.execute("INSERT INTO journal_entries(entry_no,entry_date,description,project_id) VALUES(?,?,?,?)",(x.entry_no,x.entry_date,x.description,x.project_id)).lastrowid
+  for l in x.lines:
+   if not c.execute("SELECT id FROM accounts WHERE id=? AND active=1",(l.account_id,)).fetchone(): raise HTTPException(404,"Account not found")
+   c.execute("INSERT INTO journal_lines(journal_id,account_id,debit,credit,description,project_id) VALUES(?,?,?,?,?,?)",(jid,l.account_id,l.debit,l.credit,l.description,l.project_id))
+ audit("create","journal_entry",jid)
+ return journal_detail(jid)
+@router.get("/accounting/journals")
+def list_journals(): return rows("SELECT * FROM journal_entries ORDER BY id DESC")
+@router.get("/accounting/journals/{journal_id}")
+def journal_detail(journal_id:int):
+ j=one("SELECT * FROM journal_entries WHERE id=?",(journal_id,))
+ if not j: raise HTTPException(404,"Journal entry not found")
+ j["lines"]=rows("SELECT jl.*,a.code account_code,a.name account_name FROM journal_lines jl JOIN accounts a ON a.id=jl.account_id WHERE jl.journal_id=?",(journal_id,))
+ j["total_debit"]=sum(x["debit"] for x in j["lines"]); j["total_credit"]=sum(x["credit"] for x in j["lines"])
+ return j
+@router.post("/accounting/journals/{journal_id}/post")
+def post_journal(journal_id:int):
+ j=journal_detail(journal_id)
+ if abs(j["total_debit"]-j["total_credit"])>0.000001: raise HTTPException(409,"Journal is not balanced")
+ with connect() as c: c.execute("UPDATE journal_entries SET status='Posted',posted_at=CURRENT_TIMESTAMP WHERE id=? AND status='Draft'",(journal_id,))
+ audit("post","journal_entry",journal_id)
+ return journal_detail(journal_id)
+@router.get("/accounting/trial-balance")
+def trial_balance():
+ return rows("""SELECT a.code,a.name,a.account_type,COALESCE(SUM(CASE WHEN j.status='Posted' THEN jl.debit ELSE 0 END),0) debit,COALESCE(SUM(CASE WHEN j.status='Posted' THEN jl.credit ELSE 0 END),0) credit,COALESCE(SUM(CASE WHEN j.status='Posted' THEN jl.debit-jl.credit ELSE 0 END),0) balance FROM accounts a LEFT JOIN journal_lines jl ON jl.account_id=a.id LEFT JOIN journal_entries j ON j.id=jl.journal_id GROUP BY a.id ORDER BY a.code""")

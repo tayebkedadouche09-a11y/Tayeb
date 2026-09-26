@@ -8,7 +8,7 @@ PERMISSIONS={
  "admin":{"*"},
  "project_manager":{"projects","boq","tasks","reports","workers","attendance","equipment","materials","purchases","subcontractors","billings","cashflow","costs","bim","payroll","documents","issues"},
  "engineer":{"projects","boq","tasks","reports","bim","documents","issues"},
- "accountant":{"projects","billings","cashflow","costs","purchases","payroll"},
+ "accountant":{"projects","billings","cashflow","costs","purchases","payroll","accounting"},
  "site_manager":{"projects","tasks","reports","workers","attendance","equipment","materials","issues"},
  "viewer":{"projects","boq","tasks","reports","workers","equipment","materials","purchases","subcontractors","billings","cashflow","costs","bim","payroll","documents","issues"},
 }
