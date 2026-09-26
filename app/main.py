@@ -13,7 +13,7 @@ PERM_BY_PATH={
  "/api/projects":"projects","/api/boq":"boq","/api/tasks":"tasks","/api/workers":"workers","/api/attendance":"attendance",
  "/api/equipment":"equipment","/api/materials":"materials","/api/purchases":"purchases","/api/subcontractors":"subcontractors",
  "/api/daily-reports":"reports","/api/billings":"billings","/api/cashflow":"cashflow","/api/costs":"costs","/api/bim/jobs":"bim",
- "/api/dashboard":"projects","/api/audit":"projects"
+ "/api/dashboard":"projects","/api/audit":"projects","/api/payroll":"payroll","/api/change-orders":"projects","/api/progress":"boq","/api/billing-payments":"billings","/api/documents":"projects","/api/issues":"projects"
 }
 @app.middleware("http")
 async def api_guard(request:Request,call_next):
