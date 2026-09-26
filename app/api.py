@@ -7,36 +7,42 @@ def rows(sql,args=()):
  with connect() as c:return [dict(x) for x in c.execute(sql,args).fetchall()]
 def one(sql,args=()):
  with connect() as c:
-  x=c.execute(sql,args).fetchone(); return dict(x) if x else None
+  x=c.execute(sql,args).fetchone();return dict(x) if x else None
 def audit(a,e,i):
  with connect() as c:c.execute("INSERT INTO audit_log(action,entity,entity_id) VALUES(?,?,?)",(a,e,i))
 def insert(table,fields,values):
- with connect() as c:
-  cur=c.execute(f"INSERT INTO {table}({','.join(fields)}) VALUES({','.join('?'*len(values))})",values); i=cur.lastrowid
- audit("create",table,i); return one(f"SELECT * FROM {table} WHERE id=?",(i,))
+ try:
+  with connect() as c:
+   cur=c.execute(f"INSERT INTO {table}({','.join(fields)}) VALUES({','.join('?'*len(values))})",values);i=cur.lastrowid
+  audit("create",table,i);return one(f"SELECT * FROM {table} WHERE id=?",(i,))
+ except Exception as e: raise HTTPException(409,str(e))
 @router.get("/dashboard")
 def dashboard():
- p=rows("SELECT * FROM projects"); billed=one("SELECT COALESCE(SUM(gross_amount),0)v FROM billings")["v"]
- cost=one("""SELECT COALESCE((SELECT SUM(amount) FROM purchases)+(SELECT SUM(amount) FROM cashflow WHERE direction='OUT'),0)v""")["v"]
- return {"projects":len(p),"active":sum(x["status"]!="Closed" for x in p),"contract_value":sum(x["contract_value"] for x in p),"boq_value":one("SELECT COALESCE(SUM(quantity*unit_rate),0)v FROM boq")["v"],"billed":billed,"recorded_cost":cost}
+ p=rows("SELECT * FROM projects")
+ billed=one("SELECT COALESCE(SUM(gross_amount),0)v FROM billings")["v"]
+ income=one("SELECT COALESCE(SUM(amount),0)v FROM cashflow WHERE direction='IN'")["v"]
+ out=one("SELECT COALESCE(SUM(amount),0)v FROM cashflow WHERE direction='OUT'")["v"]
+ purchases=one("SELECT COALESCE(SUM(amount),0)v FROM purchases")["v"]
+ return {"projects":len(p),"active":sum(x["status"]!="Closed" for x in p),"contract_value":sum(x["contract_value"] for x in p),"boq_value":one("SELECT COALESCE(SUM(quantity*unit_rate),0)v FROM boq")["v"],"billed":billed,"cash_in":income,"cash_out":out,"purchases":purchases,"gross_margin_proxy":sum(x["contract_value"] for x in p)-purchases-out}
 @router.get("/projects")
 def projects():return rows("SELECT * FROM projects ORDER BY id DESC")
 @router.post("/projects")
-def project(x:ProjectIn):
- try:return insert("projects",["code","name","client","location","contract_value","start_date","end_date"],[x.code,x.name,x.client,x.location,x.contract_value,x.start_date,x.end_date])
- except Exception as e:raise HTTPException(409,str(e))
+def project(x:ProjectIn):return insert("projects",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/projects/{pid}")
 def project_detail(pid:int):
  p=one("SELECT * FROM projects WHERE id=?",(pid,))
  if not p:raise HTTPException(404,"Project not found")
- for key,sql in {"tasks":"SELECT * FROM tasks WHERE project_id=?","boq":"SELECT *,quantity*unit_rate amount FROM boq WHERE project_id=?","reports":"SELECT * FROM daily_reports WHERE project_id=? ORDER BY report_date DESC","billings":"SELECT * FROM billings WHERE project_id=?","purchases":"SELECT * FROM purchases WHERE project_id=?","subcontractors":"SELECT * FROM subcontractors WHERE project_id=?","cashflow":"SELECT * FROM cashflow WHERE project_id=? ORDER BY entry_date DESC"}.items():p[key]=rows(sql,(pid,))
+ queries={"tasks":"SELECT * FROM tasks WHERE project_id=?","boq":"SELECT *,quantity*unit_rate amount FROM boq WHERE project_id=?","reports":"SELECT * FROM daily_reports WHERE project_id=? ORDER BY report_date DESC","billings":"SELECT * FROM billings WHERE project_id=?","purchases":"SELECT * FROM purchases WHERE project_id=?","subcontractors":"SELECT * FROM subcontractors WHERE project_id=?","cashflow":"SELECT * FROM cashflow WHERE project_id=? ORDER BY entry_date DESC","attendance":"SELECT a.*,w.name worker_name,w.role FROM attendance a JOIN workers w ON w.id=a.worker_id WHERE a.project_id=? ORDER BY work_date DESC","equipment_logs":"SELECT e.name,e.code,l.* FROM equipment_logs l JOIN equipment e ON e.id=l.equipment_id WHERE l.project_id=? ORDER BY work_date DESC"}
+ for k,q in queries.items():p[k]=rows(q,(pid,))
  return p
 @router.post("/tasks")
-def task(x:TaskIn):return insert("tasks",["project_id","name","start_date","end_date","progress"],x.model_dump().values())
+def task(x:TaskIn):
+ if not one("SELECT id FROM projects WHERE id=?",(x.project_id,)):raise HTTPException(404,"Project not found")
+ return insert("tasks",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/boq")
 def boq(project_id:int|None=None):return rows("SELECT *,quantity*unit_rate amount FROM boq WHERE project_id=COALESCE(?,project_id) ORDER BY project_id,code",(project_id,))
 @router.post("/boq")
-def add_boq(x:BOQIn):return insert("boq",["project_id","code","description","unit","quantity","unit_rate","category"],list(x.model_dump().values()))
+def add_boq(x:BOQIn):return insert("boq",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/workers")
 def workers():return rows("SELECT * FROM workers WHERE active=1")
 @router.post("/workers")
@@ -49,8 +55,13 @@ def attendance_list(project_id:int|None=None):return rows("SELECT a.*,w.name wor
 def equipment():return rows("SELECT * FROM equipment")
 @router.post("/equipment")
 def equipment_add(x:EquipmentIn):return insert("equipment",list(x.model_dump().keys()),list(x.model_dump().values()))
+@router.post("/equipment/logs")
+def equipment_log(x:EquipmentLogIn):
+ e=one("SELECT hourly_rate FROM equipment WHERE id=?",(x.equipment_id,))
+ if not e:raise HTTPException(404,"Equipment not found")
+ return insert("equipment_logs",["equipment_id","project_id","work_date","hours","cost","notes"],[x.equipment_id,x.project_id,x.work_date,x.hours,x.hours*e["hourly_rate"],x.notes])
 @router.get("/materials")
-def materials():return rows("SELECT * FROM materials")
+def materials():return rows("SELECT *,stock*unit_cost stock_value,CASE WHEN stock<=reorder_level THEN 1 ELSE 0 END low_stock FROM materials")
 @router.post("/materials")
 def material(x:MaterialIn):return insert("materials",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.post("/materials/move")
@@ -62,16 +73,22 @@ def material_move(x:MaterialMoveIn):
   if m["stock"]+delta<0:raise HTTPException(409,"Insufficient stock")
   c.execute("UPDATE materials SET stock=stock+? WHERE id=?",(delta,x.material_id))
   i=c.execute("INSERT INTO material_moves(project_id,material_id,quantity,move_type,reference) VALUES(?,?,?,?,?)",(x.project_id,x.material_id,x.quantity,x.move_type,x.reference)).lastrowid
- return one("SELECT * FROM material_moves WHERE id=?",(i,))
+ audit("stock_move","material",x.material_id);return one("SELECT * FROM material_moves WHERE id=?",(i,))
+@router.get("/purchases")
+def purchases(project_id:int|None=None):return rows("SELECT * FROM purchases WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
 @router.post("/purchases")
 def purchase(x:PurchaseIn):return insert("purchases",list(x.model_dump().keys()),list(x.model_dump().values()))
+@router.get("/subcontractors")
+def subcontractors(project_id:int|None=None):return rows("SELECT * FROM subcontractors WHERE project_id=COALESCE(?,project_id)",(project_id,))
 @router.post("/subcontractors")
 def subcontractor(x:SubcontractIn):return insert("subcontractors",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.post("/daily-reports")
 def daily(x:DailyReportIn):return insert("daily_reports",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.post("/billings")
 def billing(x:BillingIn):
- d=x.model_dump(); i=insert("billings",list(d.keys()),list(d.values())); i["net_amount"]=x.gross_amount-x.gross_amount*x.retention_percent/100+x.tax_amount; return i
+ d=x.model_dump();i=insert("billings",list(d.keys()),list(d.values()));i["retention_amount"]=x.gross_amount*x.retention_percent/100;i["net_amount"]=x.gross_amount-i["retention_amount"]+x.tax_amount;return i
+@router.get("/billings")
+def billings(project_id:int|None=None):return rows("SELECT *,gross_amount*retention_percent/100 retention_amount,gross_amount-gross_amount*retention_percent/100+tax_amount net_amount FROM billings WHERE project_id=COALESCE(?,project_id) ORDER BY id DESC",(project_id,))
 @router.post("/cashflow")
 def cashflow(x:CashflowIn):return insert("cashflow",list(x.model_dump().keys()),list(x.model_dump().values()))
 @router.get("/cashflow")
@@ -83,13 +100,12 @@ def bim(x:BIMJobIn):
  if target:
   try:
    req=urllib.request.Request(target+"/api/v1/jobs",data=json.dumps(x.model_dump()).encode(),headers={"Content-Type":"application/json"})
-   with urllib.request.urlopen(req,timeout=10) as r:result=json.loads(r.read())
+   with urllib.request.urlopen(req,timeout=15) as r:result=json.loads(r.read())
    with connect() as c:c.execute("UPDATE bim_jobs SET status='Submitted',result_json=? WHERE id=?",(json.dumps(result),i["id"]))
   except Exception as e:
    with connect() as c:c.execute("UPDATE bim_jobs SET status='GatewayError',result_json=? WHERE id=?",(json.dumps({"error":str(e)}),i["id"]))
  return one("SELECT * FROM bim_jobs WHERE id=?",(i["id"],))
 @router.get("/audit")
-def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
+def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500)
 @router.get("/health/modules")
-def module_health():
- return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"bim_boundary":True}
+def module_health():return {"projects":True,"boq":True,"labour":True,"equipment":True,"materials":True,"procurement":True,"subcontractors":True,"site_reports":True,"billing":True,"cashflow":True,"bim_boundary":True}
