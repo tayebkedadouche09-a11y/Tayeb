@@ -6,7 +6,7 @@ from .db import init_db
 from .api import router
 from .auth import bootstrap_owner,current_user,PERMISSIONS
 
-app=FastAPI(title="Tayeb Construction ERP",version="1.1.0",docs_url="/docs",redoc_url="/redoc")
+app=FastAPI(title="Tayeb Construction ERP",version="1.2.0",docs_url="/docs",redoc_url="/redoc")
 app.include_router(router,prefix="/api")
 PUBLIC={"/api/auth/login","/api/health","/api/health/modules"}
 PERM_BY_PATH={
@@ -34,6 +34,15 @@ async def api_guard(request:Request,call_next):
                 return JSONResponse({"detail":"Permission denied"},status_code=403)
             if perm and user["role"] not in {"owner","admin"} and perm not in PERMISSIONS.get(user["role"],set()):
                 return JSONResponse({"detail":"Permission denied"},status_code=403)
+    qpid=request.query_params.get("project_id")
+    if qpid and user.get("role") not in {"owner","admin","legacy"}:
+        try:
+            from .db import connect
+            pid=int(qpid)
+            with connect() as db:
+                if not db.execute("SELECT 1 FROM projects WHERE id=?",(pid,)).fetchone(): return JSONResponse({"detail":"Project not found"},status_code=404)
+                if not db.execute("SELECT 1 FROM project_members WHERE project_id=? AND user_id=?",(pid,int(user["sub"]))).fetchone(): return JSONResponse({"detail":"Project access denied"},status_code=403)
+        except ValueError: return JSONResponse({"detail":"Invalid project_id"},status_code=422)
     return await call_next(request)
 
 @app.on_event("startup")
