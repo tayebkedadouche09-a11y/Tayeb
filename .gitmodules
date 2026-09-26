@@ -1,0 +1,12 @@
+[submodule "components/erp-core"]
+	path = components/erp-core
+	url = https://github.com/tayebkedadouche09-a11y/Ideal-tayeb.git
+	branch = develop
+[submodule "components/commercial-suite"]
+	path = components/commercial-suite
+	url = https://github.com/tayebkedadouche09-a11y/ideal-tayeb1.git
+	branch = master
+[submodule "components/bim-engine"]
+	path = components/bim-engine
+	url = https://github.com/tayebkedadouche09-a11y/Ideal-tayeb2.git
+	branch = main
