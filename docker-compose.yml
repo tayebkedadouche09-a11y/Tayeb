@@ -6,7 +6,9 @@ services:
     environment:
       TAYEB_BIM_URL: http://bim-engine:8001
       TAYEB_DB_PATH: /app/data/tayeb.db
-      TAYEB_API_TOKEN: ${TAYEB_API_TOKEN:?Set TAYEB_API_TOKEN in .env}
+      TAYEB_AUTH_SECRET: ${TAYEB_AUTH_SECRET:?Set TAYEB_AUTH_SECRET in .env}
+      TAYEB_BOOTSTRAP_PASSWORD: ${TAYEB_BOOTSTRAP_PASSWORD:?Set TAYEB_BOOTSTRAP_PASSWORD in .env}
+      TAYEB_API_TOKEN: ${TAYEB_API_TOKEN:-}
     volumes: ["tayeb_data:/app/data"]
     depends_on: [bim-engine]
   bim-engine:
