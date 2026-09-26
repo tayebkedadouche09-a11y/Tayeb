@@ -35,6 +35,33 @@ async def api_guard(request:Request,call_next):
             if perm and user["role"] not in {"owner","admin"} and perm not in PERMISSIONS.get(user["role"],set()):
                 return JSONResponse({"detail":"Permission denied"},status_code=403)
     qpid=request.query_params.get("project_id")
+    if not qpid and request.method in {"POST","PUT","PATCH"}:
+        try:
+            import json
+            body=await request.body()
+            if body:
+                payload=json.loads(body)
+                if isinstance(payload,dict) and payload.get("project_id") is not None:
+                    qpid=str(payload["project_id"])
+        except Exception:
+            pass
+    if not qpid and user.get("role") not in {"owner","admin","legacy"}:
+        from .db import connect
+        import re
+        m=re.match(r"^/api/(purchases|billings|documents|issues|change-orders|billing-payments|supplier-invoices|supplier-payments)/(\d+)",path)
+        if m:
+            table,rid=m.group(1),int(m.group(2))
+            try:
+                with connect() as db:
+                    if table=="billing-payments":
+                        row=db.execute("SELECT b.project_id FROM billing_payments bp JOIN billings b ON b.id=bp.billing_id WHERE bp.id=?",(rid,)).fetchone()
+                    elif table=="supplier-payments":
+                        row=db.execute("SELECT si.project_id FROM supplier_payments sp JOIN supplier_invoices si ON si.id=sp.supplier_invoice_id WHERE sp.id=?",(rid,)).fetchone()
+                    else:
+                        row=db.execute("SELECT project_id FROM "+table.replace("-","_")+" WHERE id=?",(rid,)).fetchone()
+                if row and row["project_id"] is not None: qpid=str(row["project_id"])
+            except Exception:
+                pass
     if qpid and user.get("role") not in {"owner","admin","legacy"}:
         try:
             from .db import connect
