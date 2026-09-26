@@ -105,6 +105,22 @@ def bim(x:BIMJobIn):
   except Exception as e:
    with connect() as c:c.execute("UPDATE bim_jobs SET status='GatewayError',result_json=? WHERE id=?",(json.dumps({"error":str(e)}),i["id"]))
  return one("SELECT * FROM bim_jobs WHERE id=?",(i["id"],))
+@router.post("/costs")
+def cost(x:CostIn): return insert("cost_entries",list(x.model_dump().keys()),list(x.model_dump().values()))
+@router.get("/costs")
+def costs(project_id:int|None=None): return rows("SELECT * FROM cost_entries WHERE project_id=COALESCE(?,project_id) ORDER BY entry_date DESC",(project_id,))
+@router.get("/projects/{pid}/financial-summary")
+def financial_summary(pid:int):
+ if not one("SELECT id FROM projects WHERE id=?",(pid,)): raise HTTPException(404,"Project not found")
+ contract=one("SELECT contract_value v FROM projects WHERE id=?",(pid,))["v"]
+ boq=one("SELECT COALESCE(SUM(quantity*unit_rate),0)v FROM boq WHERE project_id=?",(pid,))["v"]
+ billed=one("SELECT COALESCE(SUM(gross_amount),0)v FROM billings WHERE project_id=?",(pid,))["v"]
+ cash_in=one("SELECT COALESCE(SUM(amount),0)v FROM cashflow WHERE project_id=? AND direction='IN'",(pid,))["v"]
+ cash_out=one("SELECT COALESCE(SUM(amount),0)v FROM cashflow WHERE project_id=? AND direction='OUT'",(pid,))["v"]
+ costs_total=one("SELECT COALESCE(SUM(amount),0)v FROM cost_entries WHERE project_id=?",(pid,))["v"]
+ purchases=one("SELECT COALESCE(SUM(amount),0)v FROM purchases WHERE project_id=?",(pid,))["v"]
+ equipment=one("SELECT COALESCE(SUM(cost),0)v FROM equipment_logs WHERE project_id=?",(pid,))["v"]
+ return {"contract_value":contract,"boq_value":boq,"billed":billed,"cash_in":cash_in,"cash_out":cash_out,"direct_costs":costs_total,"purchases":purchases,"equipment_cost":equipment,"estimated_cost":costs_total+purchases+equipment,"remaining_contract":contract-billed}
 @router.get("/audit")
 def audit_log():return rows("SELECT * FROM audit_log ORDER BY id DESC LIMIT 500")
 @router.get("/health/modules")

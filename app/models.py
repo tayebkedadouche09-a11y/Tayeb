@@ -15,3 +15,4 @@ class SubcontractIn(BaseModel): project_id:int; company:str; scope:str; contract
 class BillingIn(BaseModel): project_id:int; invoice_no:str; gross_amount:float=Field(gt=0); retention_percent:float=Field(5,ge=0,le=100); tax_amount:float=Field(0,ge=0)
 class CashflowIn(BaseModel): project_id:int; entry_date:str; direction:str; category:str; amount:float=Field(gt=0); reference:str=""
 class BIMJobIn(BaseModel): project_id:int; source_type:str; source_uri:str; job_type:str="takeoff"
+class CostIn(BaseModel): project_id:int; entry_date:str; cost_type:str; description:str=""; amount:float=Field(gt=0); reference:str=""
